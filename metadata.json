@@ -1,0 +1,6 @@
+{
+  "name": "OmniWABA - WhatsApp Cloud API Enterprise Platform",
+  "description": "Multi-tenant WhatsApp Business Cloud API CRM with separated Marketing & Utility credits, atomic reservation, complete SQL schema, campaign wizard, live chat, bot automation, and Super Admin console.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
