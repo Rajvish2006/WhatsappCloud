@@ -1,19 +1,60 @@
-import React, { useState } from 'react';
-import { useApp } from '../../context/AppContext';
-import { 
-  KeyRound, 
-  Plus, 
-  RotateCw, 
-  Trash2, 
-  Copy, 
-  Check, 
-  ShieldAlert, 
-  Terminal, 
-  Sliders, 
-  Clock, 
-  CheckCircle2, 
-  AlertCircle 
-} from 'lucide-react';
+
+import React, { useState } from "react";
+import { useApp } from "../../context/AppContext";
+import {
+  KeyRound,
+  Plus,
+  RotateCw,
+  Trash2,
+  Copy,
+  Check,
+  ShieldCheck,
+  Terminal,
+  Clock,
+  CheckCircle2,
+  AlertCircle,
+  X,
+  Building2,
+  Activity,
+  LockKeyhole,
+} from "lucide-react";
+
+const BRAND = "Webcraft Solution";
+
+const availableScopes = [
+  {
+    id: "messages:send",
+    label: "messages:send",
+    desc: "Send individual and batch messages",
+  },
+  {
+    id: "templates:read",
+    label: "templates:read",
+    desc: "Read approved message templates",
+  },
+  {
+    id: "contacts:read",
+    label: "contacts:read",
+    desc: "Read contacts and consent details",
+  },
+  {
+    id: "contacts:write",
+    label: "contacts:write",
+    desc: "Create and update contacts",
+  },
+  {
+    id: "webhooks:listen",
+    label: "webhooks:listen",
+    desc: "Receive delivery status callbacks",
+  },
+];
+
+type TestResult = {
+  success: boolean;
+  statusCode: number;
+  message: string;
+  remainingLimit: number;
+};
 
 export const TenantApiKeys: React.FC = () => {
   const {
@@ -22,401 +63,788 @@ export const TenantApiKeys: React.FC = () => {
     revokeApiKey,
     rotateApiKey,
     testApiCall,
-    currentCompany
+    currentCompany,
   } = useApp();
 
   const [isGenerateOpen, setIsGenerateOpen] = useState(false);
-  const [newKeyName, setNewKeyName] = useState('');
-  const [selectedScopes, setSelectedScopes] = useState<string[]>(['messages:send', 'templates:read']);
-  const [rateLimitRpm, setRateLimitRpm] = useState<number>(120);
-
-  // One-time reveal modal state
+  const [newKeyName, setNewKeyName] = useState("");
+  const [selectedScopes, setSelectedScopes] = useState<string[]>([
+    "messages:send",
+    "templates:read",
+  ]);
+  const [rateLimitRpm, setRateLimitRpm] = useState(120);
   const [revealedKey, setRevealedKey] = useState<string | null>(null);
   const [copiedKey, setCopiedKey] = useState(false);
+  const [copyError, setCopyError] = useState("");
+  const [testEndpoint, setTestEndpoint] = useState(
+    "/api/v1/messages/send"
+  );
+  const [selectedTestKey, setSelectedTestKey] = useState(
+    apiKeys.find(
+      (key) =>
+        key.companyId === currentCompany.id &&
+        key.status === "ACTIVE"
+    )?.keyPrefix || ""
+  );
+  const [testResult, setTestResult] =
+    useState<TestResult | null>(null);
 
-  // Interactive Playground State
-  const [testEndpoint, setTestEndpoint] = useState('/api/v1/messages/send');
-  const [selectedTestKey, setSelectedTestKey] = useState<string>(apiKeys[0]?.keyPrefix || '');
-  const [testResult, setTestResult] = useState<{ success: boolean; statusCode: number; message: string; remainingLimit: number } | null>(null);
+  const companyKeys = apiKeys.filter(
+    (key) => key.companyId === currentCompany.id
+  );
 
-  const availableScopes = [
-    { id: 'messages:send', label: 'messages:send', desc: 'Dispatch single and batch WhatsApp messages' },
-    { id: 'templates:read', label: 'templates:read', desc: 'Inspect approved Meta template parameters' },
-    { id: 'contacts:read', label: 'contacts:read', desc: 'Query contact consent and attributes' },
-    { id: 'contacts:write', label: 'contacts:write', desc: 'Create and update contacts and groups' },
-    { id: 'webhooks:listen', label: 'webhooks:listen', desc: 'Subscribe to delivery status callbacks' }
-  ];
+  const activeKeys = companyKeys.filter(
+    (key) => key.status === "ACTIVE"
+  );
 
   const handleGenerateSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newKeyName.trim()) return;
 
-    const { rawKey } = generateApiKey(newKeyName.trim(), selectedScopes, rateLimitRpm);
+    if (!newKeyName.trim() || selectedScopes.length === 0) return;
+
+    const { rawKey } = generateApiKey(
+      newKeyName.trim(),
+      selectedScopes,
+      rateLimitRpm
+    );
+
     setIsGenerateOpen(false);
     setRevealedKey(rawKey);
-    setNewKeyName('');
+    setNewKeyName("");
+    setSelectedScopes(["messages:send", "templates:read"]);
   };
 
   const handleRotate = (keyId: string) => {
+    const confirmed = window.confirm(
+      "Rotate this API key? The existing key may stop working immediately."
+    );
+
+    if (!confirmed) return;
+
     const { newRawKey } = rotateApiKey(keyId);
+
     if (newRawKey) {
       setRevealedKey(newRawKey);
     }
   };
 
-  const copyToClipboard = (text: string) => {
-    navigator.clipboard.writeText(text);
-    setCopiedKey(true);
-    setTimeout(() => setCopiedKey(false), 2000);
+  const handleRevoke = (keyId: string) => {
+    const confirmed = window.confirm(
+      "Revoke this API key? Applications using it may lose access."
+    );
+
+    if (confirmed) {
+      revokeApiKey(keyId);
+    }
+  };
+
+  const copyToClipboard = async (value: string) => {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopiedKey(true);
+      setCopyError("");
+
+      window.setTimeout(() => setCopiedKey(false), 2000);
+    } catch {
+      setCopiedKey(false);
+      setCopyError(
+        "Copy failed. Select the secret and copy it manually."
+      );
+    }
   };
 
   const handleRunTestCall = () => {
-    const res = testApiCall(selectedTestKey, testEndpoint);
-    setTestResult(res);
+    if (!selectedTestKey) {
+      setTestResult({
+        success: false,
+        statusCode: 401,
+        message: "Select an active API key before testing.",
+        remainingLimit: 0,
+      });
+      return;
+    }
+
+    const result = testApiCall(selectedTestKey, testEndpoint);
+    setTestResult(result);
+  };
+
+  const toggleScope = (scopeId: string) => {
+    setSelectedScopes((previous) =>
+      previous.includes(scopeId)
+        ? previous.filter((scope) => scope !== scopeId)
+        : [...previous, scopeId]
+    );
   };
 
   return (
-    <div className="p-6 max-w-7xl mx-auto space-y-6">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-800 pb-5">
-        <div>
-          <div className="flex items-center space-x-2">
-            <span className="bg-rose-500/10 text-rose-400 border border-rose-500/30 text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wider">
-              P0 Requirement
-            </span>
-            <h1 className="text-xl font-bold text-white tracking-tight">
-              Secure Tenant API Credentials & Token Lifecycle
+    <main className="min-h-screen bg-slate-950 px-4 py-6 text-slate-200 sm:px-6 lg:px-8">
+      <div className="mx-auto max-w-7xl space-y-7">
+        {/* Header */}
+        <header className="flex flex-col justify-between gap-5 border-b border-slate-800 pb-6 sm:flex-row sm:items-center">
+          <div>
+            <div className="mb-3 flex items-center gap-3">
+              <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-blue-600 shadow-lg shadow-blue-950/50">
+                <KeyRound className="h-5 w-5 text-white" />
+              </div>
+
+              <div>
+                <p className="text-sm font-bold tracking-wide text-white">
+                  {BRAND}
+                </p>
+                <p className="text-xs text-slate-500">
+                  Developer & Integrations
+                </p>
+              </div>
+            </div>
+
+            <h1 className="text-2xl font-bold tracking-tight text-white sm:text-3xl">
+              API Key Management
             </h1>
+
+            <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-400">
+              Manage API credentials, permissions, and request limits
+              for your company integrations.
+            </p>
           </div>
-          <p className="text-xs text-slate-400 mt-1">
-            Generate, SHA-256 hash, revoke, rotate, expire credentials with company-scoped permissions & rate limits.
-          </p>
-        </div>
 
-        <button
-          onClick={() => setIsGenerateOpen(true)}
-          className="flex items-center space-x-1.5 px-4 py-2 rounded-lg bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold shadow-md shadow-rose-950/50 transition"
-        >
-          <Plus className="w-3.5 h-3.5" />
-          <span>Generate New API Key</span>
-        </button>
-      </div>
+          <button
+            type="button"
+            onClick={() => setIsGenerateOpen(true)}
+            className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-400"
+          >
+            <Plus className="h-4 w-4" />
+            Create API Key
+          </button>
+        </header>
 
-      {/* Security Architecture Notice */}
-      <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 flex items-start space-x-3 text-xs text-slate-300">
-        <ShieldAlert className="w-5 h-5 text-rose-400 shrink-0 mt-0.5" />
-        <div>
-          <div className="font-bold text-white">Cryptographic Storage Specification</div>
-          <p className="text-slate-400 mt-0.5 leading-relaxed">
-            Raw API secrets are displayed <strong>exactly once</strong> upon creation and never stored in plain text.
-            OmniWABA stores only the irreversible <strong>SHA-256</strong> hash. Incoming requests are hashed in-memory and matched using constant-time string comparison to prevent timing attacks.
-          </p>
-        </div>
-      </div>
-
-      {/* API Keys Table */}
-      <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-lg">
-        <div className="p-4 border-b border-slate-800 flex items-center justify-between">
-          <h2 className="text-sm font-bold text-white flex items-center space-x-2">
-            <KeyRound className="w-4 h-4 text-rose-400" />
-            <span>Active Credentials for {currentCompany.name}</span>
-          </h2>
-          <span className="text-[11px] text-slate-400">
-            {apiKeys.filter(k => k.companyId === currentCompany.id && k.status === 'ACTIVE').length} Active Keys
-          </span>
-        </div>
-
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs text-slate-300">
-            <thead className="bg-slate-950 text-slate-400 uppercase text-[10px] font-semibold border-b border-slate-800">
-              <tr>
-                <th className="py-3 px-4">Key Name & Prefix</th>
-                <th className="py-3 px-3">SHA-256 Hash Digest</th>
-                <th className="py-3 px-3">Scopes</th>
-                <th className="py-3 px-3">Rate Limit (RPM)</th>
-                <th className="py-3 px-3">Status</th>
-                <th className="py-3 px-3">Expires At</th>
-                <th className="py-3 px-4 text-right">Lifecycle Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-800/80">
-              {apiKeys.map((key) => {
-                const isCurrentTenant = key.companyId === currentCompany.id;
-                const usagePct = (key.currentMinuteUsage / key.rateLimitRpm) * 100;
-                return (
-                  <tr key={key.id} className={`hover:bg-slate-800/40 transition ${!isCurrentTenant ? 'opacity-50' : ''}`}>
-                    <td className="py-3 px-4">
-                      <div className="font-semibold text-white">{key.name}</div>
-                      <div className="font-mono text-[10px] text-rose-300">{key.keyPrefix}••••••••</div>
-                    </td>
-
-                    <td className="py-3 px-3">
-                      <span className="font-mono text-[10px] text-slate-400 bg-slate-950 px-2 py-0.5 rounded border border-slate-800" title={key.tokenHash}>
-                        {key.tokenHash.substring(0, 16)}...
-                      </span>
-                    </td>
-
-                    <td className="py-3 px-3">
-                      <div className="flex flex-wrap gap-1 max-w-[200px]">
-                        {key.scopes.map((s) => (
-                          <span key={s} className="px-1.5 py-0.5 rounded bg-slate-800 text-[9px] font-mono text-slate-300 border border-slate-700">
-                            {s}
-                          </span>
-                        ))}
-                      </div>
-                    </td>
-
-                    <td className="py-3 px-3">
-                      <div className="space-y-1">
-                        <div className="flex justify-between text-[10px] text-slate-400">
-                          <span>{key.currentMinuteUsage} / {key.rateLimitRpm}</span>
-                          <span>{usagePct.toFixed(0)}%</span>
-                        </div>
-                        <div className="w-24 bg-slate-800 h-1.5 rounded-full overflow-hidden">
-                          <div style={{ width: `${Math.min(100, usagePct)}%` }} className={`h-full ${usagePct > 80 ? 'bg-rose-500' : 'bg-emerald-500'}`} />
-                        </div>
-                      </div>
-                    </td>
-
-                    <td className="py-3 px-3">
-                      <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase border ${
-                        key.status === 'ACTIVE'
-                          ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30'
-                          : 'bg-rose-500/10 text-rose-400 border border-rose-500/30'
-                      }`}>
-                        {key.status}
-                      </span>
-                    </td>
-
-                    <td className="py-3 px-3 text-[11px] text-slate-400 font-mono">
-                      {new Date(key.expiresAt).toLocaleDateString()}
-                    </td>
-
-                    <td className="py-3 px-4 text-right">
-                      {key.status === 'ACTIVE' ? (
-                        <div className="flex items-center justify-end space-x-2">
-                          <button
-                            onClick={() => handleRotate(key.id)}
-                            className="p-1.5 rounded hover:bg-slate-800 text-slate-400 hover:text-amber-300 transition"
-                            title="Rotate Key (Issues new secret and revokes old)"
-                          >
-                            <RotateCw className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            onClick={() => revokeApiKey(key.id)}
-                            className="p-1.5 rounded hover:bg-slate-800 text-slate-400 hover:text-rose-400 transition"
-                            title="Revoke Key Permanently"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      ) : (
-                        <span className="text-[10px] text-slate-500 italic">Revoked</span>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {/* Interactive API Testing Playground */}
-      <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-lg space-y-4">
-        <div>
-          <h2 className="text-sm font-bold text-white flex items-center space-x-2">
-            <Terminal className="w-4 h-4 text-emerald-400" />
-            <span>Interactive API Request Tester & Rate Limit Inspector</span>
-          </h2>
-          <p className="text-xs text-slate-400 mt-0.5">
-            Test authorization, scope validation, and rate limit counters in real time.
-          </p>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          <div>
-            <label className="block text-slate-400 text-xs mb-1">Key to Authenticate</label>
-            <select
-              value={selectedTestKey}
-              onChange={(e) => setSelectedTestKey(e.target.value)}
-              className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-xs text-white focus:outline-none"
-            >
-              {apiKeys.map(k => (
-                <option key={k.id} value={k.keyPrefix}>
-                  {k.name} ({k.keyPrefix}...) - {k.status}
-                </option>
-              ))}
-            </select>
-          </div>
+        {/* Security notice */}
+        <section className="flex items-start gap-3 rounded-2xl border border-blue-500/20 bg-blue-500/5 p-4 sm:p-5">
+          <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-blue-400" />
 
           <div>
-            <label className="block text-slate-400 text-xs mb-1">Target Endpoint</label>
-            <select
-              value={testEndpoint}
-              onChange={(e) => setTestEndpoint(e.target.value)}
-              className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-xs text-white focus:outline-none"
-            >
-              <option value="/api/v1/messages/send">POST /api/v1/messages/send</option>
-              <option value="/api/v1/templates/list">GET /api/v1/templates/list</option>
-              <option value="/api/v1/contacts/query">GET /api/v1/contacts/query</option>
-            </select>
+            <h2 className="text-sm font-semibold text-white">
+              Security best practices
+            </h2>
+            <p className="mt-1 text-sm leading-6 text-slate-400">
+              Treat API secrets like passwords. Reveal a secret only when
+              creating or rotating a key, store it securely, grant only
+              the permissions required, and revoke compromised credentials
+              immediately.
+            </p>
+            <p className="mt-2 text-xs leading-5 text-amber-300">
+              Verify that your backend hashes secrets securely and enforces
+              tenant isolation, permissions, expiration, and rate limits.
+              This interface alone does not implement those protections.
+            </p>
           </div>
+        </section>
 
-          <div className="flex items-end">
-            <button
-              onClick={handleRunTestCall}
-              className="w-full py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-lg transition"
-            >
-              Execute Request
-            </button>
-          </div>
-        </div>
-
-        {/* Test Result Display */}
-        {testResult && (
-          <div className={`p-3.5 rounded-lg border text-xs font-mono flex items-start space-x-2.5 ${
-            testResult.statusCode === 200
-              ? 'bg-emerald-950/40 border-emerald-500/40 text-emerald-300'
-              : testResult.statusCode === 429
-              ? 'bg-amber-950/40 border-amber-500/40 text-amber-300'
-              : 'bg-rose-950/40 border-rose-500/40 text-rose-300'
-          }`}>
-            {testResult.statusCode === 200 ? (
-              <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
-            ) : (
-              <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
-            )}
-            <div className="flex-1">
-              <div className="font-bold">
-                HTTP {testResult.statusCode} Response &bull; Remaining Quota: {testResult.remainingLimit} RPM
-              </div>
-              <div className="text-[11px] text-slate-300 mt-0.5">{testResult.message}</div>
+        {/* Overview cards */}
+        <section className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+          <div className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
+            <div className="flex items-center justify-between">
+              <p className="text-sm text-slate-400">Total credentials</p>
+              <KeyRound className="h-5 w-5 text-blue-400" />
             </div>
+            <p className="mt-3 text-3xl font-bold text-white">
+              {companyKeys.length}
+            </p>
+            <p className="mt-1 text-xs text-slate-500">
+              Issued to this company
+            </p>
           </div>
-        )}
-      </div>
 
-      {/* GENERATE API KEY MODAL */}
-      {isGenerateOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-xs p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-xl max-w-md w-full p-6 shadow-2xl space-y-4">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-              <h3 className="text-base font-bold text-white flex items-center space-x-2">
-                <KeyRound className="w-4 h-4 text-rose-400" />
-                <span>Create New Scoped API Key</span>
+          <div className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
+            <div className="flex items-center justify-between">
+              <p className="text-sm text-slate-400">Active keys</p>
+              <CheckCircle2 className="h-5 w-5 text-emerald-400" />
+            </div>
+            <p className="mt-3 text-3xl font-bold text-white">
+              {activeKeys.length}
+            </p>
+            <p className="mt-1 text-xs text-slate-500">
+              Currently marked active
+            </p>
+          </div>
+
+          <div className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
+            <div className="flex items-center justify-between">
+              <p className="text-sm text-slate-400">Company workspace</p>
+              <Building2 className="h-5 w-5 text-indigo-400" />
+            </div>
+            <p className="mt-3 truncate text-xl font-bold text-white">
+              {currentCompany.name}
+            </p>
+            <p className="mt-1 text-xs text-slate-500">
+              Company-scoped credentials
+            </p>
+          </div>
+        </section>
+
+        {/* Credentials table */}
+        <section className="overflow-hidden rounded-2xl border border-slate-800 bg-slate-900 shadow-xl shadow-black/10">
+          <div className="flex flex-col justify-between gap-3 border-b border-slate-800 p-5 sm:flex-row sm:items-center">
+            <div>
+              <h2 className="font-semibold text-white">
+                API Credentials
+              </h2>
+              <p className="mt-1 text-xs text-slate-400">
+                Review permissions, usage, status, and expiration.
+              </p>
+            </div>
+
+            <span className="w-fit rounded-full border border-emerald-500/20 bg-emerald-500/10 px-3 py-1.5 text-xs font-medium text-emerald-400">
+              {activeKeys.length} active
+            </span>
+          </div>
+
+          {companyKeys.length === 0 ? (
+            <div className="px-6 py-14 text-center">
+              <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-slate-800">
+                <KeyRound className="h-6 w-6 text-slate-400" />
+              </div>
+              <h3 className="mt-4 font-semibold text-white">
+                No API keys yet
               </h3>
-              <button onClick={() => setIsGenerateOpen(false)} className="text-slate-400 hover:text-white text-lg">&times;</button>
+              <p className="mx-auto mt-2 max-w-sm text-sm leading-6 text-slate-400">
+                Create your first API key to connect an authorized
+                application or integration.
+              </p>
+              <button
+                type="button"
+                onClick={() => setIsGenerateOpen(true)}
+                className="mt-5 inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-500"
+              >
+                <Plus className="h-4 w-4" />
+                Create your first key
+              </button>
             </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[1050px] text-left text-sm">
+                <thead className="bg-slate-950/70 text-[11px] uppercase tracking-wider text-slate-500">
+                  <tr>
+                    <th className="px-5 py-4 font-semibold">Credential</th>
+                    <th className="px-4 py-4 font-semibold">Permissions</th>
+                    <th className="px-4 py-4 font-semibold">Usage</th>
+                    <th className="px-4 py-4 font-semibold">Status</th>
+                    <th className="px-4 py-4 font-semibold">Expires</th>
+                    <th className="px-5 py-4 text-right font-semibold">
+                      Actions
+                    </th>
+                  </tr>
+                </thead>
 
-            <form onSubmit={handleGenerateSubmit} className="space-y-4 text-xs">
-              <div>
-                <label className="block text-slate-300 font-medium mb-1">Key Description / Purpose</label>
-                <input
-                  type="text"
-                  value={newKeyName}
-                  onChange={(e) => setNewKeyName(e.target.value)}
-                  placeholder="e.g. Production Mobile App Webhook"
-                  className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white focus:outline-none focus:border-rose-500"
-                  required
-                />
-              </div>
+                <tbody className="divide-y divide-slate-800">
+                  {companyKeys.map((key) => {
+                    const usagePercent =
+                      key.rateLimitRpm > 0
+                        ? Math.min(
+                            100,
+                            Math.max(
+                              0,
+                              (key.currentMinuteUsage /
+                                key.rateLimitRpm) *
+                                100
+                            )
+                          )
+                        : 0;
 
-              <div>
-                <label className="block text-slate-300 font-medium mb-1">Scoped Permissions</label>
-                <div className="space-y-1.5 max-h-40 overflow-y-auto pr-1">
-                  {availableScopes.map((scope) => {
-                    const isChecked = selectedScopes.includes(scope.id);
+                    const isActive = key.status === "ACTIVE";
+                    const isExpired =
+                      new Date(key.expiresAt).getTime() <= Date.now();
+
                     return (
-                      <label key={scope.id} className="flex items-start space-x-2 p-2 bg-slate-950 rounded border border-slate-800/80 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={isChecked}
-                          onChange={(e) => {
-                            if (e.target.checked) setSelectedScopes([...selectedScopes, scope.id]);
-                            else setSelectedScopes(selectedScopes.filter(s => s !== scope.id));
-                          }}
-                          className="mt-0.5 rounded text-rose-500 focus:ring-0"
-                        />
-                        <div>
-                          <div className="font-mono text-slate-200 font-semibold">{scope.label}</div>
-                          <div className="text-[10px] text-slate-400">{scope.desc}</div>
-                        </div>
-                      </label>
+                      <tr
+                        key={key.id}
+                        className="transition hover:bg-slate-800/40"
+                      >
+                        <td className="px-5 py-4">
+                          <p className="font-semibold text-white">
+                            {key.name}
+                          </p>
+                          <p className="mt-1 font-mono text-xs text-blue-300">
+                            {key.keyPrefix}••••••••
+                          </p>
+                          <p className="mt-1 text-[11px] text-slate-500">
+                            ID: {key.id}
+                          </p>
+                        </td>
+
+                        <td className="max-w-xs px-4 py-4">
+                          <div className="flex flex-wrap gap-1.5">
+                            {key.scopes.map((scope) => (
+                              <span
+                                key={scope}
+                                className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 font-mono text-[10px] text-slate-300"
+                              >
+                                {scope}
+                              </span>
+                            ))}
+                          </div>
+                        </td>
+
+                        <td className="px-4 py-4">
+                          <div className="w-32 space-y-2">
+                            <div className="flex justify-between gap-2 text-xs">
+                              <span className="text-slate-300">
+                                {key.currentMinuteUsage}/
+                                {key.rateLimitRpm}
+                              </span>
+                              <span
+                                className={
+                                  usagePercent >= 80
+                                    ? "text-amber-400"
+                                    : "text-slate-500"
+                                }
+                              >
+                                {usagePercent.toFixed(0)}%
+                              </span>
+                            </div>
+                            <div
+                              className="h-1.5 overflow-hidden rounded-full bg-slate-800"
+                              role="progressbar"
+                              aria-valuenow={usagePercent}
+                              aria-valuemin={0}
+                              aria-valuemax={100}
+                              aria-label={`Usage for ${key.name}`}
+                            >
+                              <div
+                                className={`h-full rounded-full transition-all ${
+                                  usagePercent >= 80
+                                    ? "bg-amber-400"
+                                    : "bg-blue-500"
+                                }`}
+                                style={{ width: `${usagePercent}%` }}
+                              />
+                            </div>
+                            <p className="text-[10px] text-slate-500">
+                              Requests per minute
+                            </p>
+                          </div>
+                        </td>
+
+                        <td className="px-4 py-4">
+                          <span
+                            className={`inline-flex rounded-full border px-2.5 py-1 text-[10px] font-semibold ${
+                              isActive && !isExpired
+                                ? "border-emerald-500/20 bg-emerald-500/10 text-emerald-400"
+                                : "border-red-500/20 bg-red-500/10 text-red-400"
+                            }`}
+                          >
+                            {isExpired && isActive
+                              ? "EXPIRED"
+                              : key.status}
+                          </span>
+                        </td>
+
+                        <td className="whitespace-nowrap px-4 py-4 text-xs text-slate-400">
+                          <span className="inline-flex items-center gap-1.5">
+                            <Clock className="h-3.5 w-3.5" />
+                            {new Date(key.expiresAt).toLocaleDateString()}
+                          </span>
+                        </td>
+
+                        <td className="px-5 py-4">
+                          <div className="flex justify-end gap-1">
+                            {isActive && !isExpired ? (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => handleRotate(key.id)}
+                                  title="Rotate API key"
+                                  aria-label={`Rotate ${key.name}`}
+                                  className="rounded-lg p-2 text-slate-400 transition hover:bg-slate-800 hover:text-blue-300"
+                                >
+                                  <RotateCw className="h-4 w-4" />
+                                </button>
+
+                                <button
+                                  type="button"
+                                  onClick={() => handleRevoke(key.id)}
+                                  title="Revoke API key"
+                                  aria-label={`Revoke ${key.name}`}
+                                  className="rounded-lg p-2 text-slate-400 transition hover:bg-red-500/10 hover:text-red-400"
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </button>
+                              </>
+                            ) : (
+                              <span className="px-2 py-2 text-xs text-slate-500">
+                                No actions
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
                     );
                   })}
-                </div>
-              </div>
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          <div className="border-t border-slate-800 px-5 py-3 text-xs text-slate-500">
+            Displaying credentials belonging to {currentCompany.name}.
+          </div>
+        </section>
+
+        {/* API Playground */}
+        <section className="space-y-5 rounded-2xl border border-slate-800 bg-slate-900 p-5 sm:p-6">
+          <div className="flex items-start gap-3">
+            <div className="rounded-xl bg-indigo-500/10 p-3">
+              <Terminal className="h-5 w-5 text-indigo-400" />
+            </div>
+            <div>
+              <h2 className="font-semibold text-white">
+                API Integration Tester
+              </h2>
+              <p className="mt-1 text-sm leading-6 text-slate-400">
+                Test your configured authorization and endpoint rules.
+                Results depend on your existing AppContext implementation.
+              </p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+            <div>
+              <label
+                htmlFor="test-key"
+                className="mb-2 block text-xs font-medium text-slate-400"
+              >
+                API credential
+              </label>
+              <select
+                id="test-key"
+                value={selectedTestKey}
+                onChange={(e) => setSelectedTestKey(e.target.value)}
+                className="w-full rounded-xl border border-slate-700 bg-slate-950 p-3 text-sm text-white outline-none focus:border-blue-500"
+              >
+                <option value="">Select a key</option>
+                {companyKeys.map((key) => (
+                  <option key={key.id} value={key.keyPrefix}>
+                    {key.name} — {key.status}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label
+                htmlFor="test-endpoint"
+                className="mb-2 block text-xs font-medium text-slate-400"
+              >
+                Endpoint
+              </label>
+              <select
+                id="test-endpoint"
+                value={testEndpoint}
+                onChange={(e) => setTestEndpoint(e.target.value)}
+                className="w-full rounded-xl border border-slate-700 bg-slate-950 p-3 text-sm text-white outline-none focus:border-blue-500"
+              >
+                <option value="/api/v1/messages/send">
+                  POST /api/v1/messages/send
+                </option>
+                <option value="/api/v1/templates/list">
+                  GET /api/v1/templates/list
+                </option>
+                <option value="/api/v1/contacts/query">
+                  GET /api/v1/contacts/query
+                </option>
+              </select>
+            </div>
+
+            <div className="flex items-end">
+              <button
+                type="button"
+                onClick={handleRunTestCall}
+                className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-blue-500"
+              >
+                <Activity className="h-4 w-4" />
+                Test configuration
+              </button>
+            </div>
+          </div>
+
+          {testResult && (
+            <div
+              role="status"
+              className={`flex items-start gap-3 rounded-xl border p-4 ${
+                testResult.statusCode === 200
+                  ? "border-emerald-500/20 bg-emerald-500/5"
+                  : testResult.statusCode === 429
+                    ? "border-amber-500/20 bg-amber-500/5"
+                    : "border-red-500/20 bg-red-500/5"
+              }`}
+            >
+              {testResult.statusCode === 200 ? (
+                <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-emerald-400" />
+              ) : (
+                <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-amber-400" />
+              )}
 
               <div>
-                <label className="block text-slate-300 font-medium mb-1">
-                  Rate Limit: <strong className="text-rose-400 font-mono">{rateLimitRpm} Requests / Min</strong>
-                </label>
-                <input
-                  type="range"
-                  min="60"
-                  max="600"
-                  step="30"
-                  value={rateLimitRpm}
-                  onChange={(e) => setRateLimitRpm(parseInt(e.target.value))}
-                  className="w-full accent-rose-500"
-                />
+                <p className="text-sm font-semibold text-white">
+                  HTTP {testResult.statusCode}
+                  {" · "}
+                  Remaining quota: {testResult.remainingLimit} RPM
+                </p>
+                <p className="mt-1 text-sm text-slate-400">
+                  {testResult.message}
+                </p>
               </div>
+            </div>
+          )}
+        </section>
 
-              <div className="flex justify-end space-x-2 pt-2">
+        {/* Create API key modal */}
+        {isGenerateOpen && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/75 p-4 backdrop-blur-sm"
+            onMouseDown={(e) => {
+              if (e.target === e.currentTarget) {
+                setIsGenerateOpen(false);
+              }
+            }}
+          >
+            <section
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="create-key-title"
+              className="my-auto max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl border border-slate-700 bg-slate-900 p-6 shadow-2xl"
+            >
+              <div className="mb-6 flex items-start justify-between gap-4 border-b border-slate-800 pb-4">
+                <div>
+                  <h2
+                    id="create-key-title"
+                    className="font-semibold text-white"
+                  >
+                    Create API credential
+                  </h2>
+                  <p className="mt-1 text-xs text-slate-400">
+                    Configure a name, permissions, and request limit.
+                  </p>
+                </div>
+
                 <button
                   type="button"
                   onClick={() => setIsGenerateOpen(false)}
-                  className="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium"
+                  aria-label="Close dialog"
+                  className="rounded-lg p-2 text-slate-400 hover:bg-slate-800 hover:text-white"
                 >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="px-4 py-2 rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-bold"
-                >
-                  Create Key
+                  <X className="h-4 w-4" />
                 </button>
               </div>
-            </form>
-          </div>
-        </div>
-      )}
 
-      {/* ONE-TIME RAW KEY REVEAL MODAL */}
-      {revealedKey && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
-          <div className="bg-slate-900 border border-rose-500/50 rounded-xl max-w-lg w-full p-6 shadow-2xl space-y-4">
-            <div className="flex items-center space-x-2 text-rose-400">
-              <ShieldAlert className="w-5 h-5" />
-              <h3 className="text-base font-bold text-white">Save Your API Secret Now</h3>
-            </div>
-
-            <p className="text-xs text-slate-300 leading-relaxed">
-              For security, this raw key is only shown once and cannot be retrieved again. If you lose it, you will need to rotate or generate a new key.
-            </p>
-
-            <div className="p-3 bg-black rounded-lg border border-slate-700 flex items-center justify-between font-mono text-xs text-rose-300 break-all select-all">
-              <span>{revealedKey}</span>
-              <button
-                onClick={() => copyToClipboard(revealedKey)}
-                className="ml-2 p-1.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 shrink-0"
+              <form
+                onSubmit={handleGenerateSubmit}
+                className="space-y-6"
               >
-                {copiedKey ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
-              </button>
-            </div>
+                <div>
+                  <label
+                    htmlFor="key-name"
+                    className="mb-2 block text-sm font-medium text-slate-300"
+                  >
+                    Credential name
+                  </label>
+                  <input
+                    id="key-name"
+                    type="text"
+                    maxLength={100}
+                    value={newKeyName}
+                    onChange={(e) => setNewKeyName(e.target.value)}
+                    placeholder="e.g. Website Production"
+                    className="w-full rounded-xl border border-slate-700 bg-slate-950 p-3 text-sm text-white outline-none placeholder:text-slate-600 focus:border-blue-500"
+                    required
+                  />
+                </div>
 
-            <div className="flex justify-end">
-              <button
-                onClick={() => setRevealedKey(null)}
-                className="px-4 py-2 rounded-lg bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold"
-              >
-                I have securely saved this key
-              </button>
-            </div>
+                <div>
+                  <div className="mb-3 flex items-center justify-between">
+                    <label className="text-sm font-medium text-slate-300">
+                      Permissions
+                    </label>
+                    <span className="text-xs text-slate-500">
+                      {selectedScopes.length} selected
+                    </span>
+                  </div>
+
+                  <div className="space-y-2">
+                    {availableScopes.map((scope) => (
+                      <label
+                        key={scope.id}
+                        className="flex cursor-pointer items-start gap-3 rounded-xl border border-slate-800 bg-slate-950 p-3 transition hover:border-slate-700"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={selectedScopes.includes(scope.id)}
+                          onChange={() => toggleScope(scope.id)}
+                          className="mt-1 h-4 w-4 accent-blue-500"
+                        />
+                        <span className="min-w-0">
+                          <span className="block font-mono text-xs font-semibold text-slate-200">
+                            {scope.label}
+                          </span>
+                          <span className="mt-1 block text-xs leading-5 text-slate-500">
+                            {scope.desc}
+                          </span>
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+
+                  {selectedScopes.length === 0 && (
+                    <p className="mt-2 text-xs text-amber-400">
+                      Select at least one permission.
+                    </p>
+                  )}
+                </div>
+
+                <div>
+                  <div className="mb-3 flex items-center justify-between gap-3">
+                    <label
+                      htmlFor="rate-limit"
+                      className="text-sm font-medium text-slate-300"
+                    >
+                      Request limit
+                    </label>
+                    <span className="font-mono text-sm font-semibold text-blue-400">
+                      {rateLimitRpm} RPM
+                    </span>
+                  </div>
+                  <input
+                    id="rate-limit"
+                    type="range"
+                    min={60}
+                    max={600}
+                    step={30}
+                    value={rateLimitRpm}
+                    onChange={(e) =>
+                      setRateLimitRpm(Number(e.target.value))
+                    }
+                    className="w-full accent-blue-500"
+                  />
+                  <div className="mt-1 flex justify-between text-xs text-slate-500">
+                    <span>60 RPM</span>
+                    <span>600 RPM</span>
+                  </div>
+                </div>
+
+                <div className="flex flex-col-reverse gap-3 border-t border-slate-800 pt-5 sm:flex-row sm:justify-end">
+                  <button
+                    type="button"
+                    onClick={() => setIsGenerateOpen(false)}
+                    className="rounded-xl border border-slate-700 px-4 py-2.5 text-sm font-medium text-slate-300 transition hover:bg-slate-800"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={
+                      !newKeyName.trim() || selectedScopes.length === 0
+                    }
+                    className="rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    Generate credential
+                  </button>
+                </div>
+              </form>
+            </section>
           </div>
-        </div>
-      )}
-    </div>
+        )}
+
+        {/* One-time secret reveal */}
+        {revealedKey && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center overflow-y-auto bg-black/80 p-4 backdrop-blur-sm">
+            <section
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="secret-title"
+              className="my-auto w-full max-w-lg space-y-5 rounded-2xl border border-blue-500/30 bg-slate-900 p-6 shadow-2xl"
+            >
+              <div className="flex items-start gap-3">
+                <div className="rounded-xl bg-blue-500/10 p-3">
+                  <LockKeyhole className="h-6 w-6 text-blue-400" />
+                </div>
+                <div>
+                  <h2
+                    id="secret-title"
+                    className="text-lg font-bold text-white"
+                  >
+                    Save your API secret
+                  </h2>
+                  <p className="mt-1 text-sm leading-6 text-slate-400">
+                    Copy this secret and store it in a secure secret
+                    manager. After closing this dialog, it will no longer
+                    be displayed here.
+                  </p>
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-slate-700 bg-slate-950 p-4">
+                <div className="flex items-start gap-3">
+                  <code className="min-w-0 flex-1 break-all font-mono text-sm text-blue-300">
+                    {revealedKey}
+                  </code>
+                  <button
+                    type="button"
+                    onClick={() => copyToClipboard(revealedKey)}
+                    aria-label="Copy API secret"
+                    className="shrink-0 rounded-lg border border-slate-700 bg-slate-800 p-2 text-slate-300 transition hover:bg-slate-700"
+                  >
+                    {copiedKey ? (
+                      <Check className="h-4 w-4 text-emerald-400" />
+                    ) : (
+                      <Copy className="h-4 w-4" />
+                    )}
+                  </button>
+                </div>
+
+                {copiedKey && (
+                  <p className="mt-3 text-xs text-emerald-400">
+                    Copied to clipboard.
+                  </p>
+                )}
+
+                {copyError && (
+                  <p className="mt-3 text-xs text-amber-400">
+                    {copyError}
+                  </p>
+                )}
+              </div>
+
+              <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-3 text-xs leading-5 text-amber-300">
+                Never share API secrets in public repositories, screenshots,
+                frontend source code, or client-side environment variables.
+              </div>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setRevealedKey(null);
+                  setCopiedKey(false);
+                  setCopyError("");
+                }}
+                className="w-full rounded-xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-blue-500"
+              >
+                I have saved my secret
+              </button>
+            </section>
+          </div>
+        )}
+
+        <footer className="flex flex-col items-center justify-between gap-2 border-t border-slate-800 pt-5 text-xs text-slate-500 sm:flex-row">
+          <p>
+            © {new Date().getFullYear()} {BRAND}
+          </p>
+          <p className="flex items-center gap-1.5">
+            <ShieldCheck className="h-3.5 w-3.5" />
+            Developer Console
+          </p>
+        </footer>
+      </div>
+    </main>
   );
 };
+
+export default TenantApiKeys;
