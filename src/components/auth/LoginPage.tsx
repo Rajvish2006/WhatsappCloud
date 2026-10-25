@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useApp } from '../../context/AppContext';
-import { AspLogo } from '../common/AspLogo';
+import { WebcraftLogo } from "../common/WebcraftLogo";
 import { 
   Lock, 
   Mail, 
@@ -27,8 +27,8 @@ export const LoginPage: React.FC = () => {
     users
   } = useApp();
 
-  const [email, setEmail] = useState('admin@whatsappsaas.com');
-  const [password, setPassword] = useState('Password@123');
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -78,11 +78,15 @@ export const LoginPage: React.FC = () => {
       <div className="sm:mx-auto sm:w-full sm:max-w-md text-center">
         {/* Brand Logo matching PDF */}
         <div className="flex justify-center mb-3">
-          <AspLogo size="lg" />
+          <WebcraftLogo size="lg" />
         </div>
-        <h2 className="text-2xl font-extrabold text-slate-800 tracking-tight">
-          Sign in to your account
+        <h2 className="text-2xl font-extrabold text-slate-900 tracking-tight">
+          Welcome to Webcraft Solution
         </h2>
+        
+        <p className="mt-2 text-sm text-slate-500">
+          Securely access your company dashboard, projects, and integrations.
+        </p>
         <p className="mt-1 text-xs text-slate-500">
           Unified authentication portal for Super Admins, Client Organizations, and Agents
         </p>
@@ -177,8 +181,10 @@ export const LoginPage: React.FC = () => {
                   : 'bg-blue-600 hover:bg-blue-700 active:bg-blue-800 cursor-pointer'
               }`}
             >
-              <span>{isLoading ? 'Signing In...' : 'Sign in to Platform'}</span>
-              <ArrowRight className="w-3.5 h-3.5" />
+             <span>
+              {isLoading ? "Signing in..." : "Sign in to Webcraft"}
+            </span>
+            <ArrowRight className="w-4 h-4" />
             </button>
           </form>
 
@@ -254,13 +260,9 @@ export const LoginPage: React.FC = () => {
         </div>
 
         {/* Security Disclaimers Footer */}
-        <div className="mt-4 flex items-center justify-center space-x-4 text-[11px] text-slate-400">
-          <span className="flex items-center space-x-1">
-            <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" />
-            <span>SHA-256 Multi-Tenant Enforced</span>
-          </span>
-          <span>&bull;</span>
-          <span>Role-Based Tenant Isolation</span>
+       <div className="mt-5 text-center text-xs text-slate-400">
+          <ShieldCheck className="inline-block mr-1 h-4 w-4 text-emerald-500" />
+          Secure access · Webcraft Solution
         </div>
       </div>
 
