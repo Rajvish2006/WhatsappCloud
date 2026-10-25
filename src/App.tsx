@@ -17,7 +17,7 @@ import { BotsView } from './components/bots/BotsView';
 import { ApiInfoView } from './components/api/ApiInfoView';
 import { CloudApiSetupView } from './components/whatsapp/CloudApiSetupView';
 import { CompanySettingsView } from './components/settings/CompanySettingsView';
-import PrivacyPolicy from "@/component/policy-terms/privacy_policy";
+import PrivacyPolicy from './components/policy-terms/privacy_policy';
 
 
 // Super Admin Views matching Page 1 & Page 10
@@ -210,6 +210,37 @@ const MainLayout: React.FC = () => {
 
 const AppContent: React.FC = () => {
   const { authView } = useApp();
+  const [showPrivacy, setShowPrivacy] = useState(
+    window.location.hash === '#privacy' || window.location.pathname === '/privacy'
+  );
+
+  React.useEffect(() => {
+    const checkHash = () => {
+      setShowPrivacy(window.location.hash === '#privacy' || window.location.pathname === '/privacy');
+    };
+    window.addEventListener('hashchange', checkHash);
+    return () => window.removeEventListener('hashchange', checkHash);
+  }, []);
+
+  if (showPrivacy) {
+    return (
+      <div className="relative">
+        <div className="sticky top-0 z-50 bg-slate-900 border-b border-slate-800 text-white px-4 py-2 flex items-center justify-between text-xs">
+          <span className="font-semibold text-slate-200">Legal & Privacy Center</span>
+          <button
+            onClick={() => {
+              window.location.hash = '';
+              setShowPrivacy(false);
+            }}
+            className="px-3 py-1 bg-blue-600 hover:bg-blue-500 rounded font-medium text-white transition cursor-pointer"
+          >
+            ← Return to Dashboard
+          </button>
+        </div>
+        <PrivacyPolicy />
+      </div>
+    );
+  }
 
   if (authView === 'login') {
     return <LoginPage />;
@@ -230,7 +261,7 @@ export default function App() {
   );
 }
 
-export default function PrivacyPage() {
+export function PrivacyPage() {
   return <PrivacyPolicy />;
 }
 
