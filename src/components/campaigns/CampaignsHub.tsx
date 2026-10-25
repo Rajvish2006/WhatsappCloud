@@ -211,7 +211,7 @@ export const CampaignsHub: React.FC = () => {
                           title="Simulate processing the next batch chunk"
                         >
                           <Play className="w-3.5 h-3.5" />
-                          <span>Simulate Batch Tick</span>
+                          <span>Dispatch Batch (Meta API)</span>
                         </button>
 
                         <button

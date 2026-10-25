@@ -53,15 +53,20 @@ export const WhatsAppIntegration: React.FC = () => {
     setTimeout(() => setIsSyncing(false), 900);
   };
 
-  const handleSendTestOutbound = (e: React.FormEvent) => {
+  const handleSendTestOutbound = async (e: React.FormEvent) => {
     e.preventDefault();
-    const res = sendTestOutboundMessage(testToPhone, testMessageText, testOutboundCategory);
-    if (res.success) {
-      setOutboundStatus(`Success: Dispatched outbound message to ${testToPhone}. Consumed 1 ${testOutboundCategory} credit.`);
-    } else {
-      setOutboundStatus(`Failed: ${res.error}`);
+    setOutboundStatus('Dispatching message through Meta WhatsApp Cloud API...');
+    try {
+      const res = await sendTestOutboundMessage(testToPhone, testMessageText, testOutboundCategory);
+      if (res.success) {
+        setOutboundStatus(`Success: Dispatched message to ${testToPhone}. Meta WAMID: ${res.wamid || 'Confirmed'}. Consumed 1 ${testOutboundCategory} credit.`);
+      } else {
+        setOutboundStatus(`Failed: ${res.error}`);
+      }
+    } catch (err: any) {
+      setOutboundStatus(`Failed: ${err?.message || 'API dispatch error'}`);
     }
-    setTimeout(() => setOutboundStatus(null), 6000);
+    setTimeout(() => setOutboundStatus(null), 8000);
   };
 
   const handleTriggerWebhook = () => {

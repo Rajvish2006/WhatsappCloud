@@ -33,6 +33,18 @@ import {
 } from '../lib/supabaseService';
 import { generateHardenedSecretToken } from '../lib/tokenUtils';
 import {
+  fetchWhatsAppServerConfig,
+  fetchServerTemplates,
+  createServerTemplate,
+  fetchServerPhoneNumbers,
+  sendServerWhatsAppMessage,
+  sendServerCampaignBatch,
+  fetchServerWebhookEvents,
+  testServerVerifyToken,
+  WhatsAppServerConfig,
+  WebhookEventRecord
+} from '../lib/metaApiClient';
+import {
   INITIAL_COMPANIES,
   INITIAL_USERS,
   INITIAL_PLANS,
@@ -120,11 +132,12 @@ interface AppContextType {
 
   // WhatsApp Cloud API & Webhooks (P0)
   wabaConfig: WABAConfig;
+  wabaServerConfig: WhatsAppServerConfig | null;
   templates: MetaTemplate[];
   updateWabaConfig: (updates: Partial<WABAConfig>) => void;
-  syncTemplatesFromMeta: () => void;
+  syncTemplatesFromMeta: () => Promise<{ success: boolean; count?: number; error?: string }>;
   simulateIncomingWebhook: (type: 'MESSAGE' | 'STATUS_UPDATE', payload: any, verifySignature?: boolean) => { success: boolean; log: string };
-  sendTestOutboundMessage: (toPhone: string, text: string, category?: CreditCategory) => { success: boolean; error?: string };
+  sendTestOutboundMessage: (toPhone: string, text: string, category?: CreditCategory) => Promise<{ success: boolean; wamid?: string; error?: string }>;
   verifyWebhookConnection: (companyId?: string) => Promise<{ success: boolean; message: string }>;
   resetWebhookVerification: (companyId?: string) => void;
   updateCompanyAppCredentials: (appId: string, appSecret: string, companyId?: string) => void;
@@ -137,6 +150,7 @@ interface AppContextType {
   resumeCampaign: (campaignId: string) => void;
   cancelCampaign: (campaignId: string) => void;
   runCampaignSimulationStep: (campaignId: string) => void;
+  dispatchCampaignBatch: (campaignId: string) => Promise<{ success: boolean; sent?: number; failed?: number; error?: string }>;
 
   // Contacts & Audience
   contacts: Contact[];
@@ -153,7 +167,7 @@ interface AppContextType {
   botRules: BotAutomationRule[];
   activeConversationId: string | null;
   setActiveConversationId: (id: string | null) => void;
-  sendChatMessage: (conversationId: string, content: string, templateId?: string) => void;
+  sendChatMessage: (conversationId: string, content: string, templateId?: string) => Promise<void>;
   addInternalNote: (conversationId: string, note: string) => void;
   reassignConversation: (conversationId: string, agentId: string) => void;
   toggleConversationStatus: (conversationId: string, newStatus: 'open' | 'closed' | 'OPEN' | 'RESOLVED') => void;
@@ -208,6 +222,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // WhatsApp Config & Templates
   const [wabaConfig, setWabaConfig] = useState<WABAConfig>(INITIAL_WABA_CONFIG);
+  const [wabaServerConfig, setWabaServerConfig] = useState<WhatsAppServerConfig | null>(null);
   const [templates, setTemplates] = useState<MetaTemplate[]>(INITIAL_TEMPLATES);
 
   // Audience & Contacts
@@ -345,7 +360,154 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   useEffect(() => {
     syncWithSupabase();
+    // Load server-side WhatsApp configuration
+    fetchWhatsAppServerConfig()
+      .then(cfg => {
+        setWabaServerConfig(cfg);
+        if (cfg.isConfigured) {
+          syncTemplatesFromMeta().catch(() => {});
+        }
+      })
+      .catch(err => {
+        console.warn('[WhatsApp] Server config not available:', err);
+      });
   }, []);
+
+  // Webhook event real-time synchronization
+  useEffect(() => {
+    let isMounted = true;
+    const pollEvents = async () => {
+      try {
+        const data = await fetchServerWebhookEvents();
+        if (!isMounted || !data.events || data.events.length === 0) return;
+
+        // Process status updates
+        const statusUpdates = data.events.filter(e => e.type === 'STATUS_UPDATE' && e.wamid && e.status);
+        for (const ev of statusUpdates) {
+          const wamid = ev.wamid!;
+          const status = ev.status!.toLowerCase() as 'sent' | 'delivered' | 'read' | 'failed';
+          const errorCode = ev.details?.errors?.[0]?.code ? String(ev.details.errors[0].code) : undefined;
+          const hierarchy: Record<string, number> = { queued: 0, submitted: 1, sent: 1, delivered: 2, read: 3, failed: 4 };
+
+          setMessages(prev => {
+            let changed = false;
+            const next = { ...prev };
+            Object.keys(next).forEach(convId => {
+              next[convId] = next[convId].map(m => {
+                if (m.wabaMessageId === wamid || m.whatsapp_message_id === wamid) {
+                  const curLvl = hierarchy[m.deliveryStatus || 'sent'] || 0;
+                  const newLvl = hierarchy[status] || 0;
+                  if (status === 'failed' || newLvl >= curLvl) {
+                    changed = true;
+                    return { ...m, deliveryStatus: status, errorCode };
+                  }
+                }
+                return m;
+              });
+            });
+            return changed ? next : prev;
+          });
+
+          setCampaigns(prev => {
+            let changed = false;
+            const updated = prev.map(camp => {
+              const hasRecip = camp.recipients.some(r => r.wabaMessageId === wamid || r.whatsapp_message_id === wamid);
+              if (!hasRecip) return camp;
+
+              changed = true;
+              let refundedAmount = 0;
+              const updatedRecipients = camp.recipients.map(r => {
+                if (r.wabaMessageId === wamid || r.whatsapp_message_id === wamid) {
+                  const curLvl = hierarchy[r.status || 'sent'] || 0;
+                  const newLvl = hierarchy[status] || 0;
+                  if (status === 'failed' && r.status !== 'failed') {
+                    refundedAmount += 1;
+                    return { ...r, status, errorCode };
+                  }
+                  if (newLvl >= curLvl) {
+                    return {
+                      ...r,
+                      status,
+                      deliveredAt: status === 'delivered' ? new Date().toISOString() : r.deliveredAt,
+                      readAt: status === 'read' ? new Date().toISOString() : r.readAt
+                    };
+                  }
+                }
+                return r;
+              });
+
+              if (refundedAmount > 0) {
+                refundCredits(camp.companyId, camp.category, refundedAmount, camp.id, `Webhook automatic refund for failed message ${wamid}`);
+              }
+
+              const delivered = updatedRecipients.filter(r => ['delivered', 'read'].includes(r.status)).length;
+              const read = updatedRecipients.filter(r => r.status === 'read').length;
+              const failed = updatedRecipients.filter(r => r.status === 'failed').length;
+
+              return {
+                ...camp,
+                deliveredCount: delivered,
+                readCount: read,
+                failedCount: failed,
+                recipients: updatedRecipients
+              };
+            });
+            return changed ? updated : prev;
+          });
+        }
+
+        // Process inbound customer messages
+        const inboundMsgs = data.events.filter(e => e.type === 'INBOUND_MESSAGE' && e.wamid && e.from);
+        for (const ev of inboundMsgs) {
+          const from = ev.from!;
+          const wamid = ev.wamid!;
+          const text = ev.details?.text || '';
+          const contactName = ev.details?.contactName || 'WhatsApp Contact';
+
+          setMessages(prev => {
+            let alreadyExists = false;
+            Object.values(prev).forEach(msgs => {
+              if (msgs.some(m => m.wabaMessageId === wamid || m.whatsapp_message_id === wamid)) {
+                alreadyExists = true;
+              }
+            });
+            if (alreadyExists) return prev;
+
+            const conv = conversations.find(c => c.contactPhone === from) || conversations[0];
+            const convId = conv ? conv.id : 'conv_001';
+
+            const newMsg: ChatMessage = {
+              id: 'msg_in_' + Date.now(),
+              conversationId: convId,
+              companyId: currentCompany.id,
+              direction: 'incoming',
+              senderType: 'CUSTOMER',
+              senderName: contactName,
+              content: text,
+              deliveryStatus: 'delivered',
+              wabaMessageId: wamid,
+              whatsapp_message_id: wamid,
+              timestamp: new Date().toISOString()
+            };
+
+            return {
+              ...prev,
+              [convId]: [...(prev[convId] || []), newMsg]
+            };
+          });
+        }
+      } catch {
+        // Ignore polling errors
+      }
+    };
+
+    const interval = setInterval(pollEvents, 4000);
+    pollEvents();
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
+  }, [conversations, currentCompany.id]);
 
   // Helper for adding Audit Log
   const addAudit = (
@@ -1026,25 +1188,121 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     addAudit('WHATSAPP', 'WABA_CONFIG_UPDATED', `Updated Meta Cloud API Phone Number ID or Token configuration`);
   };
 
-  const syncTemplatesFromMeta = () => {
+  const syncTemplatesFromMeta = async (): Promise<{ success: boolean; count?: number; error?: string }> => {
     const job: BackgroundJob = {
       id: `job_${Date.now()}`,
       companyId: currentCompany.id,
       type: 'TEMPLATE_SYNC',
       status: 'PROCESSING',
-      progress: 50,
-      payloadDescription: `Syncing message templates with Meta Cloud API Graph v21.0 (${wabaConfig.wabaId})`,
+      progress: 30,
+      payloadDescription: `Fetching live templates via Meta Graph API (${wabaConfig.wabaId || 'WABA'})`,
       attempts: 1,
       maxAttempts: 3,
       createdAt: new Date().toISOString()
     };
     setBackgroundJobs(prev => [job, ...prev]);
 
-    setTimeout(() => {
-      setTemplates(prev => prev.map(t => ({ ...t, lastSyncedAt: new Date().toISOString() })));
-      setBackgroundJobs(prev => prev.map(j => j.id === job.id ? { ...j, status: 'COMPLETED', progress: 100, completedAt: new Date().toISOString() } : j));
-      addAudit('WHATSAPP', 'TEMPLATES_SYNCED', `Synchronized ${templates.length} templates with Meta Cloud API`);
-    }, 800);
+    try {
+      const res = await fetchServerTemplates();
+      const metaItems = res.templates || [];
+
+      // Map Meta template components to our MetaTemplate model
+      const mapped: MetaTemplate[] = metaItems.map(item => {
+        let headerText = '';
+        let headerType: 'NONE' | 'TEXT' | 'IMAGE' | 'DOCUMENT' = 'NONE';
+        let bodyText = '';
+        let footerText = '';
+        const buttons: Array<{ type: 'QUICK_REPLY' | 'URL' | 'CALL'; text: string; value?: string }> = [];
+
+        for (const comp of item.components || []) {
+          if (comp.type === 'HEADER') {
+            headerType = comp.format === 'TEXT' ? 'TEXT' : comp.format === 'IMAGE' ? 'IMAGE' : comp.format === 'DOCUMENT' ? 'DOCUMENT' : 'NONE';
+            headerText = comp.text || '';
+          } else if (comp.type === 'BODY') {
+            bodyText = comp.text || '';
+          } else if (comp.type === 'FOOTER') {
+            footerText = comp.text || '';
+          } else if (comp.type === 'BUTTONS') {
+            for (const btn of comp.buttons || []) {
+              buttons.push({
+                type: btn.type === 'QUICK_REPLY' ? 'QUICK_REPLY' : btn.type === 'URL' ? 'URL' : 'CALL',
+                text: btn.text,
+                value: btn.url || btn.phone_number
+              });
+            }
+          }
+        }
+
+        const variableMatches = bodyText.match(/\{\{\d+\}\}/g);
+        const variablesCount = variableMatches ? new Set(variableMatches).size : 0;
+
+        return {
+          id: `tpl_${item.id}`,
+          companyId: currentCompany.id,
+          metaTemplateId: item.id,
+          name: item.name,
+          whatsapp_template_name: item.name,
+          category: (item.category as any) || 'MARKETING',
+          language: item.language || 'en_US',
+          status: item.status || 'APPROVED',
+          rejectionReason: item.rejected_reason,
+          headerType,
+          headerText,
+          bodyText,
+          variablesCount,
+          sampleValues: [],
+          footerText,
+          buttons,
+          lastSyncedAt: new Date().toISOString()
+        };
+      });
+
+      setTemplates(mapped);
+
+      // Persist to Supabase if table is available
+      for (const t of mapped) {
+        saveSupabaseRecord('meta_templates', {
+          company_id: t.companyId,
+          meta_template_id: t.metaTemplateId,
+          name: t.name,
+          category: t.category,
+          language: t.language,
+          status: t.status,
+          rejection_reason: t.rejectionReason,
+          header_type: t.headerType,
+          header_text: t.headerText,
+          body_text: t.bodyText,
+          variables_count: t.variablesCount,
+          sample_values: JSON.stringify(t.sampleValues),
+          footer_text: t.footerText,
+          buttons: JSON.stringify(t.buttons),
+          last_synced_at: t.lastSyncedAt
+        }, 'company_id,name,language').catch(() => {});
+      }
+
+      setBackgroundJobs(prev => prev.map(j => j.id === job.id ? {
+        ...j,
+        status: 'COMPLETED',
+        progress: 100,
+        completedAt: new Date().toISOString(),
+        payloadDescription: `Successfully synchronized ${mapped.length} templates from Meta Graph API.`
+      } : j));
+
+      addAudit('WHATSAPP', 'TEMPLATES_SYNCED', `Synchronized ${mapped.length} verified templates from Meta Graph API`);
+      return { success: true, count: mapped.length };
+    } catch (err: any) {
+      const errMsg = err?.message || 'Meta Graph API template sync failed';
+      setBackgroundJobs(prev => prev.map(j => j.id === job.id ? {
+        ...j,
+        status: 'FAILED',
+        progress: 100,
+        errorMessage: errMsg,
+        completedAt: new Date().toISOString()
+      } : j));
+
+      addAudit('WHATSAPP', 'TEMPLATES_SYNC_FAILED', `Meta Graph API template sync error: ${errMsg}`);
+      return { success: false, error: errMsg };
+    }
   };
 
   const simulateIncomingWebhook = (
@@ -1182,7 +1440,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return { success: false, log: 'Unhandled webhook event' };
   };
 
-  const sendTestOutboundMessage = (toPhone: string, text: string, category: CreditCategory = 'UTILITY') => {
+  const sendTestOutboundMessage = async (toPhone: string, text: string, category: CreditCategory = 'UTILITY'): Promise<{ success: boolean; wamid?: string; error?: string }> => {
     const w = currentWallet;
     const available = category === 'MARKETING'
       ? (w.marketingTotal - w.marketingReserved - w.marketingConsumed)
@@ -1192,75 +1450,99 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return { success: false, error: `Insufficient ${category} credits. Available balance: ${available}.` };
     }
 
-    setWallets(prev => {
-      const cur = prev[currentCompany.id];
-      const isMkt = category === 'MARKETING';
-      const updated = {
-        ...cur,
-        [isMkt ? 'marketingConsumed' : 'utilityConsumed']: (isMkt ? cur.marketingConsumed : cur.utilityConsumed) + 1
-      };
+    try {
+      const apiRes = await sendServerWhatsAppMessage({
+        to: toPhone,
+        type: 'text',
+        text
+      });
 
-      const ledgerEntry: CreditLedgerEntry = {
-        id: `led_${Date.now()}`,
-        companyId: currentCompany.id,
-        category,
-        type: 'message_consumed',
-        amount: -1,
-        beforeBalance: available,
-        afterBalance: available - 1,
-        referenceType: 'single_send',
-        referenceId: `single_${Date.now()}`,
-        reason: `Single ${category} message dispatch to ${toPhone}`,
-        idempotencyKey: `idemp_single_${Date.now()}`,
-        timestamp: new Date().toISOString(),
-        actorId: currentUser.id,
-        actorEmail: currentUser.email
-      };
+      // Deduct credit only after send is accepted by Meta Cloud API
+      setWallets(prev => {
+        const cur = prev[currentCompany.id];
+        const isMkt = category === 'MARKETING';
+        const updated = {
+          ...cur,
+          [isMkt ? 'marketingConsumed' : 'utilityConsumed']: (isMkt ? cur.marketingConsumed : cur.utilityConsumed) + 1
+        };
 
-      setLedger(l => [ledgerEntry, ...l]);
-      return { ...prev, [currentCompany.id]: updated };
-    });
+        const ledgerEntry: CreditLedgerEntry = {
+          id: `led_${Date.now()}`,
+          companyId: currentCompany.id,
+          category,
+          type: 'message_consumed',
+          amount: -1,
+          beforeBalance: available,
+          afterBalance: available - 1,
+          referenceType: 'single_send',
+          referenceId: apiRes.wamid || `single_${Date.now()}`,
+          reason: `Single ${category} WhatsApp message dispatch to ${toPhone} (wamid: ${apiRes.wamid})`,
+          idempotencyKey: `idemp_single_${Date.now()}`,
+          timestamp: new Date().toISOString(),
+          actorId: currentUser.id,
+          actorEmail: currentUser.email
+        };
 
-    addAudit('WHATSAPP', 'OUTBOUND_MESSAGE_SENT', `Direct message sent to ${toPhone} consuming 1 ${category} credit.`);
-    return { success: true };
+        setLedger(l => [ledgerEntry, ...l]);
+        return { ...prev, [currentCompany.id]: updated };
+      });
+
+      addAudit('WHATSAPP', 'OUTBOUND_MESSAGE_SENT', `Direct message dispatched via Meta Cloud API to ${toPhone} (wamid: ${apiRes.wamid}).`);
+      return { success: true, wamid: apiRes.wamid };
+    } catch (err: any) {
+      const errMsg = err?.message || 'Meta Cloud API message send failed';
+      addAudit('WHATSAPP', 'OUTBOUND_MESSAGE_FAILED', `Failed to send message to ${toPhone}: ${errMsg}`);
+      return { success: false, error: errMsg };
+    }
   };
 
   const verifyWebhookConnection = async (companyId = currentCompany.id): Promise<{ success: boolean; message: string }> => {
-    const challengeCode = `hub_chal_${Math.random().toString(36).substring(2, 10)}`;
     const targetComp = companies.find(c => c.id === companyId) || currentCompany;
     const verifyToken = wabaConfig.webhookVerifyToken || 'webcraft_verify_token_whatsapp';
-    
-    // Simulate real handshake verification delay
-    await new Promise(resolve => setTimeout(resolve, 600));
 
-    // Update company state
-    setCompanies(prev => prev.map(c => c.id === companyId ? {
-      ...c,
-      webhookConnected: true,
-      webhookConnectedAt: new Date().toISOString()
-    } : c));
+    try {
+      const testRes = await testServerVerifyToken(verifyToken);
+      if (!testRes.match) {
+        return {
+          success: false,
+          message: `Verify token mismatch: ${testRes.message}. Set WHATSAPP_WEBHOOK_VERIFY_TOKEN on server.`
+        };
+      }
 
-    // Update WABA config if current company
-    if (companyId === currentCompany.id) {
-      setWabaConfig(prev => ({
-        ...prev,
+      // Update company state
+      setCompanies(prev => prev.map(c => c.id === companyId ? {
+        ...c,
         webhookConnected: true,
         webhookConnectedAt: new Date().toISOString()
-      }));
+      } : c));
+
+      // Update WABA config if current company
+      if (companyId === currentCompany.id) {
+        setWabaConfig(prev => ({
+          ...prev,
+          webhookConnected: true,
+          webhookConnectedAt: new Date().toISOString()
+        }));
+      }
+
+      addAudit(
+        'WHATSAPP',
+        'WEBHOOK_VERIFIED',
+        `Meta Cloud API webhook handshake verified successfully for ${targetComp.name} with verify token "${verifyToken}". Status: CONNECTED.`,
+        companyId,
+        targetComp.name
+      );
+
+      return {
+        success: true,
+        message: 'Meta Webhook GET verification handshake tested and confirmed matching configured server verify token!'
+      };
+    } catch (err: any) {
+      return {
+        success: false,
+        message: err?.message || 'Failed to verify webhook connection'
+      };
     }
-
-    addAudit(
-      'WHATSAPP',
-      'WEBHOOK_VERIFIED',
-      `Meta Cloud API webhook handshake verified successfully for ${targetComp.name} with verify token "${verifyToken}". Status: CONNECTED.`,
-      companyId,
-      targetComp.name
-    );
-
-    return {
-      success: true,
-      message: `Webhook handshake successfully verified! Meta challenge (${challengeCode}) accepted. Status: CONNECTED.`
-    };
   };
 
   const resetWebhookVerification = (companyId = currentCompany.id) => {
@@ -1453,39 +1735,60 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const runCampaignSimulationStep = (campaignId: string) => {
-    setCampaigns(prev => prev.map(camp => {
-      if (camp.id !== campaignId) return camp;
-      if (camp.status === 'completed' || camp.status === 'cancelled' || camp.status === 'paused') return camp;
+    dispatchCampaignBatch(campaignId);
+  };
 
-      const queuedRecipients = camp.recipients.filter(r => r.status === 'queued');
-      if (queuedRecipients.length === 0) {
-        return { ...camp, status: 'completed', completedAt: new Date().toISOString() };
-      }
+  const dispatchCampaignBatch = async (campaignId: string): Promise<{ success: boolean; sent?: number; failed?: number; error?: string }> => {
+    const camp = campaigns.find(c => c.id === campaignId);
+    if (!camp) return { success: false, error: 'Campaign not found' };
+    if (camp.status === 'completed' || camp.status === 'cancelled' || camp.status === 'paused') {
+      return { success: false, error: `Campaign is currently ${camp.status}` };
+    }
 
-      const batchToProcess = queuedRecipients.slice(0, 5);
+    const queuedRecipients = camp.recipients.filter(r => r.status === 'queued');
+    if (queuedRecipients.length === 0) {
+      setCampaigns(prev => prev.map(c => c.id === campaignId ? { ...c, status: 'completed', completedAt: new Date().toISOString() } : c));
+      return { success: true, sent: 0, failed: 0 };
+    }
+
+    const batchSize = Math.min(camp.batchSize || 10, queuedRecipients.length);
+    const batchToProcess = queuedRecipients.slice(0, batchSize);
+
+    try {
+      const serverRes = await sendServerCampaignBatch({
+        recipients: batchToProcess.map(r => ({
+          id: r.id,
+          contactId: r.contactId,
+          phone: r.phone,
+          variables: r.variables
+        })),
+        templateName: camp.templateName,
+        languageCode: 'en_US'
+      });
+
+      const batchResults = serverRes.results;
       let newlySent = 0;
       let newlyFailed = 0;
 
       const updatedRecipients = camp.recipients.map(r => {
-        if (batchToProcess.some(b => b.id === r.id)) {
-          const isSuccess = Math.random() > 0.08;
-          if (isSuccess) {
+        const resItem = batchResults.find(b => b.recipientId === r.id || b.phone === r.phone);
+        if (resItem) {
+          if (resItem.success && resItem.wamid) {
             newlySent++;
             return {
               ...r,
-              status: 'delivered' as const,
-              wabaMessageId: `wamid.HBgL${Math.random().toString(36).substring(2, 10).toUpperCase()}`,
-              whatsapp_message_id: `wamid.HBgL${Math.random().toString(36).substring(2, 10).toUpperCase()}`,
-              sentAt: new Date().toISOString(),
-              deliveredAt: new Date().toISOString()
+              status: 'sent' as const,
+              wamid: resItem.wamid,
+              whatsapp_message_id: resItem.wamid,
+              sentAt: new Date().toISOString()
             };
           } else {
             newlyFailed++;
             return {
               ...r,
               status: 'failed' as const,
-              errorCode: '131026',
-              errorMessage: 'Message undeliverable to target number'
+              errorCode: String(resItem.errorCode || '131026'),
+              errorMessage: resItem.error || 'Failed to dispatch via Meta Cloud API'
             };
           }
         }
@@ -1493,32 +1796,37 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       });
 
       if (newlySent > 0) {
-        commitCredits(camp.companyId, camp.category, newlySent, camp.id, `Batch sent confirmed for campaign ${camp.name}`);
+        commitCredits(camp.companyId, camp.category, newlySent, camp.id, 'Batch sent confirmed for campaign ' + camp.name);
       }
 
       if (newlyFailed > 0) {
-        refundCredits(camp.companyId, camp.category, newlyFailed, camp.id, `Automatic refund for failed recipients in ${camp.name}`);
+        refundCredits(camp.companyId, camp.category, newlyFailed, camp.id, 'Automatic refund for failed recipients in ' + camp.name);
       }
 
       const totalSent = camp.sentCount + newlySent;
       const totalFailed = camp.failedCount + newlyFailed;
       const allDone = updatedRecipients.every(r => r.status !== 'queued');
 
-      return {
-        ...camp,
+      setCampaigns(prev => prev.map(c => c.id === campaignId ? {
+        ...c,
         status: allDone ? (totalFailed > 0 ? 'partially_failed' : 'completed') : 'processing',
         sentCount: totalSent,
-        deliveredCount: camp.deliveredCount + newlySent,
-        readCount: camp.readCount + Math.floor(newlySent * 0.7),
         failedCount: totalFailed,
-        creditsConsumed: camp.creditsConsumed + newlySent,
-        consumed_credits: (camp.consumed_credits || 0) + newlySent,
-        creditsRefunded: camp.creditsRefunded + newlyFailed,
-        released_credits: (camp.released_credits || 0) + newlyFailed,
+        creditsConsumed: c.creditsConsumed + newlySent,
+        consumed_credits: (c.consumed_credits || 0) + newlySent,
+        creditsRefunded: c.creditsRefunded + newlyFailed,
+        released_credits: (c.released_credits || 0) + newlyFailed,
         recipients: updatedRecipients,
         completedAt: allDone ? new Date().toISOString() : undefined
-      };
-    }));
+      } : c));
+
+      addAudit('CAMPAIGN', 'BATCH_DISPATCHED', `Dispatched batch of ${batchToProcess.length} messages for campaign ${camp.name}. Sent: ${newlySent}, Failed: ${newlyFailed}`);
+      return { success: true, sent: newlySent, failed: newlyFailed };
+    } catch (err: any) {
+      const errMsg = err?.message || 'Campaign batch dispatch failed';
+      addAudit('CAMPAIGN', 'BATCH_SEND_ERROR', 'Batch dispatch error for ' + camp.name + ': ' + errMsg);
+      return { success: false, error: errMsg };
+    }
   };
 
   // Contacts
@@ -1599,21 +1907,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   // Live Chat
-  const sendChatMessage = (conversationId: string, content: string, templateId?: string) => {
+  const sendChatMessage = async (conversationId: string, content: string, templateId?: string) => {
     const conv = conversations.find(c => c.id === conversationId);
     if (!conv) return;
 
     const template = templateId ? templates.find(t => t.id === templateId) : null;
     const category: CreditCategory = template?.category === 'MARKETING' ? 'MARKETING' : 'UTILITY';
 
-    const deduction = sendTestOutboundMessage(conv.contactPhone, content, category);
+    const deduction = await sendTestOutboundMessage(conv.contactPhone, content, category);
     if (!deduction.success) {
-      alert(`Message dispatch failed: ${deduction.error}`);
+      alert('Message dispatch failed: ' + (deduction.error || 'Unknown error'));
       return;
     }
 
+    const realWamid = deduction.wamid || ('wamid.out_' + Date.now());
     const newMsg: ChatMessage = {
-      id: `msg_${Date.now()}`,
+      id: 'msg_' + Date.now(),
       conversationId,
       companyId: currentCompany.id,
       direction: 'outgoing',
@@ -1623,8 +1932,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       content,
       templateId,
       deliveryStatus: 'sent',
-      wabaMessageId: `wamid.HBgL${Math.random().toString(36).substring(2, 10).toUpperCase()}`,
-      whatsapp_message_id: `wamid.HBgL${Math.random().toString(36).substring(2, 10).toUpperCase()}`,
+      wabaMessageId: realWamid,
+      whatsapp_message_id: realWamid,
       timestamp: new Date().toISOString()
     };
 
@@ -1638,20 +1947,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       lastMessage: content,
       lastMessageTime: 'just now'
     } : c));
-
-    setTimeout(() => {
-      setMessages(prev => ({
-        ...prev,
-        [conversationId]: (prev[conversationId] || []).map(m => m.id === newMsg.id ? { ...m, deliveryStatus: 'delivered' } : m)
-      }));
-    }, 1200);
-
-    setTimeout(() => {
-      setMessages(prev => ({
-        ...prev,
-        [conversationId]: (prev[conversationId] || []).map(m => m.id === newMsg.id ? { ...m, deliveryStatus: 'read' } : m)
-      }));
-    }, 2800);
   };
 
   const addInternalNote = (conversationId: string, content: string) => {
@@ -1904,6 +2199,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         rotateApiKey,
         testApiCall,
         wabaConfig,
+        wabaServerConfig,
         templates,
         updateWabaConfig,
         syncTemplatesFromMeta,
@@ -1915,6 +2211,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         resumeCampaign,
         cancelCampaign,
         runCampaignSimulationStep,
+        dispatchCampaignBatch,
         contacts,
         groups,
         importContacts,

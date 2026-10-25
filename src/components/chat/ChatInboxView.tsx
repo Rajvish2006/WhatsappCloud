@@ -54,12 +54,14 @@ export const ChatInboxView: React.FC = () => {
     return true;
   });
 
-  const handleSendMessage = (e: React.FormEvent) => {
+  const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!replyText.trim() || !activeConv) return;
-    sendChatMessage(activeConv.id, replyText.trim(), selectedTemplateId || undefined);
+    const txt = replyText.trim();
+    const tplId = selectedTemplateId || undefined;
     setReplyText('');
     setSelectedTemplateId('');
+    await sendChatMessage(activeConv.id, txt, tplId);
   };
 
   const handleAddNote = (e: React.FormEvent) => {

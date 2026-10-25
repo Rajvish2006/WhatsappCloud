@@ -405,10 +405,11 @@ export const CampaignView: React.FC<CampaignViewProps> = ({ initialCreateMode = 
                       {camp.status === 'processing' && (
                         <button
                           onClick={() => runCampaignSimulationStep(camp.id)}
-                          className="px-2.5 py-1 rounded bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200 text-xs font-bold flex items-center space-x-1"
+                          className="px-2.5 py-1 rounded bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200 text-xs font-bold flex items-center space-x-1 cursor-pointer transition shadow-xs"
+                          title="Dispatch next recipient batch through Meta WhatsApp Cloud API"
                         >
-                          <Play className="w-3.5 h-3.5" />
-                          <span>Simulate Batch Send</span>
+                          <Play className="w-3.5 h-3.5 text-emerald-600" />
+                          <span>Dispatch Batch (Meta API)</span>
                         </button>
                       )}
 

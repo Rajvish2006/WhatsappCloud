@@ -59,7 +59,9 @@ export const CloudApiSetupView: React.FC = () => {
   const [testPhone, setTestPhone] = useState('+919811111111');
   const [testResult, setTestResult] = useState<string | null>(null);
 
-  const callbackUrl = `https://whatsappcloud-virid.vercel.app/api/webhook/${currentCompany.code}`;
+  const callbackUrl = typeof window !== 'undefined' 
+    ? `${window.location.origin}/api/webhooks/whatsapp` 
+    : '/api/webhooks/whatsapp';
   const verifyToken = wabaConfig.webhookVerifyToken || 'webcraft_verify_token_whatsapp';
 
   const handleCopy = (text: string, type: 'callback' | 'verify') => {
@@ -127,15 +129,20 @@ export const CloudApiSetupView: React.FC = () => {
   setTimeout(() => setSyncStatus(null), 6000);
 };
 
-  const handleTestPing = (e: React.FormEvent) => {
+  const handleTestPing = async (e: React.FormEvent) => {
     e.preventDefault();
-    const res = sendTestOutboundMessage(testPhone, 'Test ping from WhatsApp Cloud API Setup', 'UTILITY');
-    if (res.success) {
-      setTestResult(`Message successfully sent to ${testPhone}. Consumed 1 Utility credit.`);
-    } else {
-      setTestResult(`Error: ${res.error}`);
+    setTestResult('Sending test message via Meta Cloud API...');
+    try {
+      const res = await sendTestOutboundMessage(testPhone, 'Test ping from WhatsApp Cloud API Setup', 'UTILITY');
+      if (res.success) {
+        setTestResult(`Message successfully sent! Meta WAMID: ${res.wamid || 'Confirmed'}. Consumed 1 Utility credit.`);
+      } else {
+        setTestResult(`Send failed: ${res.error}`);
+      }
+    } catch (err: any) {
+      setTestResult(`Error: ${err?.message || 'Send failed'}`);
     }
-    setTimeout(() => setTestResult(null), 5000);
+    setTimeout(() => setTestResult(null), 8000);
   };
 
   const isConnected = !!currentCompany.webhookConnected;
