@@ -101,9 +101,9 @@ const MainLayout: React.FC = () => {
       return;
     }
 
-    // Toggle between Super Admin and Tenant Admin for easy evaluation
+    // Toggle between Super Admin and Tenant Admin
     if (isAdmin) {
-      const tenantUser = users.find(u => u.name.includes('Bijendra') || u.role === 'company_admin');
+      const tenantUser = users.find(u => u.role === 'company_admin');
       if (tenantUser) {
         switchUser(tenantUser.id);
         setCurrentTab('dashboard');

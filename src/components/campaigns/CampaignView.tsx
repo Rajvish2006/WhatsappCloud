@@ -15,7 +15,8 @@ import {
   Copy, 
   Plus, 
   Eye, 
-  ArrowLeft 
+  ArrowLeft,
+  AlertCircle
 } from 'lucide-react';
 
 interface CampaignViewProps {
@@ -24,6 +25,7 @@ interface CampaignViewProps {
 
 export const CampaignView: React.FC<CampaignViewProps> = ({ initialCreateMode = false }) => {
   const {
+    currentCompany,
     campaigns,
     templates,
     contacts,
@@ -48,6 +50,7 @@ export const CampaignView: React.FC<CampaignViewProps> = ({ initialCreateMode = 
   const [matchField, setMatchField] = useState('name');
   const [campaignCategory, setCampaignCategory] = useState<CreditCategory>('MARKETING');
   const [sendSuccessMessage, setSendSuccessMessage] = useState<string | null>(null);
+  const [sendErrorMessage, setSendErrorMessage] = useState<string | null>(null);
 
   const selectedTemplate = templates.find(t => t.id === selectedTemplateId) || templates[0];
   const targetRecipients = selectedContactPhone === 'all'
@@ -58,11 +61,12 @@ export const CampaignView: React.FC<CampaignViewProps> = ({ initialCreateMode = 
   const utilityAvail = currentWallet.utilityTotal - currentWallet.utilityReserved - currentWallet.utilityConsumed;
 
   const handleApplySend = () => {
+    setSendErrorMessage(null);
     const required = targetRecipients.length;
     const avail = campaignCategory === 'MARKETING' ? marketingAvail : utilityAvail;
 
     if (avail < required) {
-      alert(`Insufficient ${campaignCategory} credits. Required: ${required}, Available: ${avail}`);
+      setSendErrorMessage(`Insufficient ${campaignCategory} credits. Required: ${required}, Available: ${avail}`);
       return;
     }
 
@@ -94,6 +98,9 @@ export const CampaignView: React.FC<CampaignViewProps> = ({ initialCreateMode = 
       setSendSuccessMessage(`Campaign "${campaignName}" successfully created and queued! Reserved ${required} ${campaignCategory} credits.`);
       setIsCreating(false);
       setTimeout(() => setSendSuccessMessage(null), 6000);
+    } else {
+      setSendErrorMessage(res.error || 'Failed to dispatch campaign.');
+      setTimeout(() => setSendErrorMessage(null), 6000);
     }
   };
 
@@ -132,9 +139,28 @@ export const CampaignView: React.FC<CampaignViewProps> = ({ initialCreateMode = 
         </div>
       )}
 
+      {sendErrorMessage && (
+        <div className="p-3 bg-rose-50 border border-rose-200 rounded-lg text-rose-800 text-xs flex items-center space-x-2 font-medium">
+          <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+          <span>{sendErrorMessage}</span>
+        </div>
+      )}
+
       {/* 3-COLUMN CAMPAIGN SENDER matching Page 3 Bottom of PDF */}
       {isCreating ? (
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+        <div className="space-y-4">
+          {!currentCompany.webhookConnected && (
+            <div className="p-3.5 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-800 flex items-center justify-between">
+              <div className="flex items-center space-x-2">
+                <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+                <span>
+                  <strong>Webhook Connection Pending:</strong> The incoming webhook handshake has not yet been verified for <strong>{currentCompany.name}</strong>. Webhook status must be connected in Company Settings to monitor delivery reports and responses.
+                </span>
+              </div>
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
           {/* COLUMN 1: Campaign Details */}
           <div className="lg:col-span-4 bg-white border border-slate-200 rounded-xl p-5 shadow-xs space-y-4 text-xs">
             <h2 className="text-sm font-bold text-slate-800 border-b border-slate-100 pb-2">Campaign</h2>
@@ -337,6 +363,7 @@ export const CampaignView: React.FC<CampaignViewProps> = ({ initialCreateMode = 
               </button>
             </div>
           </div>
+        </div>
         </div>
       ) : (
         /* CAMPAIGNS LIST & BATCH PROGRESS */

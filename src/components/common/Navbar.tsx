@@ -13,7 +13,12 @@ import {
   LogOut, 
   LogIn, 
   UserPlus,
-  Check
+  Check,
+  Database,
+  RefreshCw,
+  Copy,
+  ExternalLink,
+  X
 } from 'lucide-react';
 
 interface NavbarProps {
@@ -33,10 +38,16 @@ export const Navbar: React.FC<NavbarProps> = ({ breadcrumb, onBackToAccount }) =
     startImpersonation,
     stopImpersonation,
     setAuthView,
-    logout
+    logout,
+    supabaseStatus,
+    isSupabaseSyncing,
+    syncWithSupabase,
+    copySupabaseSqlFix
   } = useApp();
 
   const [isCompanyDropdownOpen, setIsCompanyDropdownOpen] = useState(false);
+  const [isSupabaseModalOpen, setIsSupabaseModalOpen] = useState(false);
+  const [copiedSql, setCopiedSql] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   const marketingAvail = currentWallet.marketingTotal - currentWallet.marketingReserved - currentWallet.marketingConsumed;
@@ -241,6 +252,29 @@ export const Navbar: React.FC<NavbarProps> = ({ breadcrumb, onBackToAccount }) =
             </button>
           </div>
 
+          {/* Supabase Status Pill */}
+          <button
+            type="button"
+            onClick={() => setIsSupabaseModalOpen(true)}
+            className={`flex items-center space-x-1.5 px-2.5 py-1 rounded-md text-[11px] font-semibold border transition cursor-pointer shadow-2xs ${
+              supabaseStatus.isConnected
+                ? supabaseStatus.isRlsRestricted
+                  ? 'bg-amber-50 text-amber-800 border-amber-300 hover:bg-amber-100'
+                  : 'bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100'
+                : 'bg-slate-100 text-slate-600 border-slate-200 hover:bg-slate-200'
+            }`}
+            title="Click to view Supabase connection status & RLS fix script"
+          >
+            <Database className="w-3.5 h-3.5 text-emerald-600" />
+            <span className="hidden sm:inline font-bold">Supabase:</span>
+            <span>{supabaseStatus.isConnected ? (supabaseStatus.isRlsRestricted ? 'RLS Active' : 'Live') : 'Offline'}</span>
+            <span className={`w-2 h-2 rounded-full ${
+              supabaseStatus.isConnected
+                ? supabaseStatus.isRlsRestricted ? 'bg-amber-500' : 'bg-emerald-500 animate-pulse'
+                : 'bg-slate-400'
+            }`} />
+          </button>
+
           {/* Language Selector */}
           <div className="hidden md:flex items-center space-x-1 text-slate-500 text-xs font-medium cursor-pointer hover:text-slate-800">
             <Globe className="w-3.5 h-3.5" />
@@ -273,6 +307,132 @@ export const Navbar: React.FC<NavbarProps> = ({ breadcrumb, onBackToAccount }) =
           </div>
         </div>
       </div>
+
+      {/* Supabase Diagnostic & RLS Fix Modal */}
+      {isSupabaseModalOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-2xl max-w-xl w-full border border-slate-200 overflow-hidden text-slate-800">
+            <div className="px-5 py-4 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
+              <div className="flex items-center space-x-2">
+                <Database className="w-5 h-5 text-blue-600" />
+                <h3 className="font-bold text-slate-800 text-sm">Supabase Integration & Database Sync</h3>
+              </div>
+              <button
+                onClick={() => setIsSupabaseModalOpen(false)}
+                className="p-1 hover:bg-slate-200 rounded text-slate-500 hover:text-slate-700"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4 text-xs">
+              {/* Connection Status Box */}
+              <div className="p-3 rounded-lg border bg-slate-50 border-slate-200 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="font-semibold text-slate-700">Project Endpoint:</span>
+                  <span className="font-mono text-blue-600 bg-blue-50 px-2 py-0.5 rounded text-[11px] truncate max-w-[280px]">
+                    {supabaseStatus.projectUrl || 'Not Configured'}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="font-semibold text-slate-700">Sync Status:</span>
+                  <div className="flex items-center space-x-1.5 font-bold">
+                    <span className={`w-2 h-2 rounded-full ${supabaseStatus.isConnected ? 'bg-emerald-500' : 'bg-rose-500'}`} />
+                    <span className={supabaseStatus.isConnected ? 'text-emerald-700' : 'text-rose-600'}>
+                      {supabaseStatus.isConnected ? 'Connected & Verified' : 'Connection Failed'}
+                    </span>
+                  </div>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="font-semibold text-slate-700">Webhook Base URL:</span>
+                  <span className="font-mono text-slate-800 bg-white border border-slate-200 px-2 py-0.5 rounded text-[11px]">
+                    https://whatsappcloud-virid.vercel.app/api/webhook
+                  </span>
+                </div>
+              </div>
+
+              {/* RLS Alert and Fix Button */}
+              {supabaseStatus.isRlsRestricted && (
+                <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg space-y-2 text-amber-900">
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <div className="font-bold text-[12px] flex items-center space-x-1">
+                        <span>⚠️ Row-Level Security (RLS) Active in Supabase</span>
+                      </div>
+                      <p className="text-[11px] text-amber-800 mt-1">
+                        Supabase blocks anonymous browser inserts by default. To allow the CRM to write directly to your tables, copy the SQL fix below and run it once in your Supabase SQL Editor.
+                      </p>
+                    </div>
+                  </div>
+
+                  <button
+                    onClick={() => {
+                      copySupabaseSqlFix();
+                      setCopiedSql(true);
+                      setTimeout(() => setCopiedSql(false), 2000);
+                    }}
+                    className="w-full py-2 bg-amber-600 hover:bg-amber-700 text-white rounded font-bold text-xs flex items-center justify-center space-x-2 transition cursor-pointer shadow-xs"
+                  >
+                    {copiedSql ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                    <span>{copiedSql ? 'SQL Fix Copied to Clipboard!' : 'Copy SQL Fix Script for Supabase'}</span>
+                  </button>
+                </div>
+              )}
+
+              {/* Available Tables */}
+              <div>
+                <div className="font-bold text-slate-700 mb-2">Detected Supabase Tables:</div>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  {Object.entries(supabaseStatus.tablesAvailable).map(([tbl, isAvail]) => (
+                    <div 
+                      key={tbl}
+                      className={`p-2 rounded border text-center ${
+                        isAvail 
+                          ? 'bg-emerald-50/70 border-emerald-200 text-emerald-800 font-semibold' 
+                          : 'bg-slate-100 border-slate-200 text-slate-400'
+                      }`}
+                    >
+                      <div className="font-mono text-[11px]">{tbl}</div>
+                      <div className="text-[9px] mt-0.5">{isAvail ? '✓ Ready' : '— Missing'}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <div className="px-5 py-3 bg-slate-50 border-t border-slate-200 flex items-center justify-between">
+              <button
+                onClick={() => {
+                  copySupabaseSqlFix();
+                  setCopiedSql(true);
+                  setTimeout(() => setCopiedSql(false), 2000);
+                }}
+                className="text-slate-600 hover:text-slate-900 font-medium text-xs flex items-center space-x-1"
+              >
+                <Copy className="w-3.5 h-3.5" />
+                <span>{copiedSql ? 'Copied SQL' : 'Copy SQL Fix'}</span>
+              </button>
+
+              <div className="flex items-center space-x-2">
+                <button
+                  disabled={isSupabaseSyncing}
+                  onClick={() => syncWithSupabase()}
+                  className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-lg font-bold text-xs flex items-center space-x-1.5 transition cursor-pointer shadow-xs"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isSupabaseSyncing ? 'animate-spin' : ''}`} />
+                  <span>{isSupabaseSyncing ? 'Syncing...' : 'Sync Now'}</span>
+                </button>
+                <button
+                  onClick={() => setIsSupabaseModalOpen(false)}
+                  className="px-3 py-1.5 bg-slate-200 hover:bg-slate-300 text-slate-800 rounded-lg font-semibold text-xs transition"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </header>
   );
 };

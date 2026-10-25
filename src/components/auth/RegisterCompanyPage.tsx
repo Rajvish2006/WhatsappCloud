@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useApp } from '../../context/AppContext';
-import { AspLogo } from '../common/AspLogo';
+import { WebcraftLogo } from '../common/WebcraftLogo';
 import { 
   Building2, 
   ShieldCheck, 
@@ -45,8 +45,8 @@ export const RegisterCompanyPage: React.FC = () => {
   const previewSlug = companyName
     ? companyName.toLowerCase().replace(/[^a-z0-9]/g, '_').substring(0, 20)
     : 'yourcompany';
-  const previewUid = `CMP-${String(companies.length + 1).padStart(6, '0')}`;
-  const previewWebhookUrl = `https://app.aspai.in/webhook/receive/${previewUid}`;
+  const previewUid = `WC-${String(companies.length + 1).padStart(6, '0')}`;
+  const previewWebhookUrl = `https://whatsappcloud-virid.vercel.app/api/webhook/${previewUid}`;
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -90,7 +90,7 @@ export const RegisterCompanyPage: React.FC = () => {
         {/* Top Header & Logo */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-200 pb-5">
           <div className="flex items-center space-x-3">
-            <AspLogo size="md" />
+            <WebcraftLogo size="md" />
             <div>
               <h1 className="text-xl font-bold text-slate-800">
                 Company Account Registration

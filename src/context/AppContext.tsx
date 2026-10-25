@@ -23,6 +23,15 @@ import {
   AppSettings,
   RegisterCompanyData
 } from '../types';
+import { 
+  checkSupabaseConnection, 
+  fetchSupabaseTable, 
+  saveSupabaseRecord, 
+  deleteSupabaseRecord, 
+  SUPABASE_RLS_FIX_SQL, 
+  SupabaseStatus 
+} from '../lib/supabaseService';
+import { generateHardenedSecretToken } from '../lib/tokenUtils';
 import {
   INITIAL_COMPANIES,
   INITIAL_USERS,
@@ -116,6 +125,10 @@ interface AppContextType {
   syncTemplatesFromMeta: () => void;
   simulateIncomingWebhook: (type: 'MESSAGE' | 'STATUS_UPDATE', payload: any, verifySignature?: boolean) => { success: boolean; log: string };
   sendTestOutboundMessage: (toPhone: string, text: string, category?: CreditCategory) => { success: boolean; error?: string };
+  verifyWebhookConnection: (companyId?: string) => Promise<{ success: boolean; message: string }>;
+  resetWebhookVerification: (companyId?: string) => void;
+  updateCompanyAppCredentials: (appId: string, appSecret: string, companyId?: string) => void;
+  generateCompanyHardenedSecret: (name: string, scopes: string[], companyId?: string) => TenantApiKey;
 
   // Campaigns
   campaigns: Campaign[];
@@ -153,16 +166,22 @@ interface AppContextType {
   backgroundJobs: BackgroundJob[];
   createNewCompany: (company: Partial<Company>, planId: string, marketingBonus: number, utilityBonus: number) => void;
   savePlan: (plan: Partial<SubscriptionPlan>) => void;
+
+  // Supabase Sync
+  supabaseStatus: SupabaseStatus;
+  isSupabaseSyncing: boolean;
+  syncWithSupabase: () => Promise<void>;
+  copySupabaseSqlFix: () => void;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  // Tenancy & Users (Defaults to Bijendra Sain / House Seekers as in user demo)
+  // Tenancy & Users (Webcraft Solution)
   const [companies, setCompanies] = useState<Company[]>(INITIAL_COMPANIES);
-  const [currentCompanyId, setCurrentCompanyId] = useState<string>('cmp_bijendra');
+  const [currentCompanyId, setCurrentCompanyId] = useState<string>('cmp_webcraft');
   const [users, setUsers] = useState<User[]>(INITIAL_USERS);
-  const [currentUserId, setCurrentUserId] = useState<string>('usr_bijendra');
+  const [currentUserId, setCurrentUserId] = useState<string>('usr_owner');
   const [plans, setPlans] = useState<SubscriptionPlan[]>(INITIAL_PLANS);
   const [permissionMatrix, setPermissionMatrix] = useState<PermissionMatrix>(INITIAL_PERMISSION_MATRIX);
   const [appSettings, setAppSettings] = useState<AppSettings>(INITIAL_APP_SETTINGS);
@@ -203,7 +222,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [messages, setMessages] = useState<Record<string, ChatMessage[]>>(INITIAL_MESSAGES);
   const [internalNotes, setInternalNotes] = useState<Record<string, InternalNote[]>>(INITIAL_INTERNAL_NOTES);
   const [botRules, setBotRules] = useState<BotAutomationRule[]>(INITIAL_BOT_RULES);
-  const [activeConversationId, setActiveConversationId] = useState<string | null>('conv_asp_util');
+  const [activeConversationId, setActiveConversationId] = useState<string | null>('conv_001');
 
   // Logs & Jobs
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>(INITIAL_AUDIT_LOGS);
@@ -222,6 +241,111 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     utilityConsumed: 0,
     lastReconciledAt: new Date().toISOString()
   };
+
+  // Supabase State & Synchronization
+  const [supabaseStatus, setSupabaseStatus] = useState<SupabaseStatus>({
+    isConfigured: false,
+    isConnected: false,
+    projectUrl: '',
+    isRlsRestricted: false,
+    tablesAvailable: {
+      templates: false,
+      contacts: false,
+      campaigns: false,
+      bot_rules: false,
+      messages: false,
+      conversations: false,
+      companies: false,
+      users: false
+    }
+  });
+  const [isSupabaseSyncing, setIsSupabaseSyncing] = useState(false);
+
+  const copySupabaseSqlFix = () => {
+    navigator.clipboard?.writeText(SUPABASE_RLS_FIX_SQL);
+  };
+
+  const syncWithSupabase = async () => {
+    setIsSupabaseSyncing(true);
+    try {
+      const status = await checkSupabaseConnection();
+      setSupabaseStatus(status);
+
+      if (status.isConnected) {
+        // Fetch templates from Supabase
+        const tplRes = await fetchSupabaseTable('templates');
+        if (tplRes.data && tplRes.data.length > 0) {
+          setTemplates(tplRes.data.map((t: any) => ({
+            id: t.id || `tpl_${Date.now()}`,
+            companyId: t.company_id || t.companyId || 'cmp_webcraft',
+            metaTemplateId: t.meta_template_id || t.id,
+            name: t.name || 'template',
+            whatsapp_template_name: t.whatsapp_template_name || t.name || 'template',
+            category: t.category || 'MARKETING',
+            language: t.language || 'en_US',
+            status: t.status || 'APPROVED',
+            headerType: t.header_type || 'NONE',
+            headerContent: t.header_content,
+            bodyText: t.body_text || t.body || '',
+            variablesCount: t.variables_count || 0,
+            sampleValues: t.sample_values || [],
+            footerText: t.footer_text,
+            buttons: t.buttons || [],
+            lastSyncedAt: new Date().toISOString()
+          })));
+        }
+
+        // Fetch contacts from Supabase
+        const cntRes = await fetchSupabaseTable('contacts');
+        if (cntRes.data && cntRes.data.length > 0) {
+          setContacts(cntRes.data.map((c: any) => ({
+            id: c.id,
+            companyId: c.company_id || c.companyId || 'cmp_webcraft',
+            phone: c.phone || '',
+            name: c.name || 'Contact',
+            email: c.email,
+            country_code: c.country_code || 'IN',
+            consentStatus: c.consent_status || 'OPTED_IN',
+            consentSource: c.consent_source || 'MANUAL',
+            consentTimestamp: c.consent_timestamp || c.consent_recorded_at || new Date().toISOString(),
+            tags: c.tags || [],
+            groups: c.groups || c.group_ids || [],
+            customAttributes: c.custom_attributes || c.customFields || {},
+            createdAt: c.created_at || new Date().toISOString(),
+            updatedAt: c.updated_at || new Date().toISOString()
+          })));
+        }
+
+        // Fetch bot rules from Supabase
+        const botRes = await fetchSupabaseTable('bot_rules');
+        if (botRes.data && botRes.data.length > 0) {
+          setBotRules(botRes.data.map((b: any) => ({
+            id: b.id,
+            companyId: b.company_id || b.companyId || 'cmp_webcraft',
+            name: b.name || 'Bot Rule',
+            priority: b.priority || 10,
+            triggerType: b.trigger_type || 'CONTAINS',
+            trigger_text: b.trigger_text || b.keywords?.join(', ') || '',
+            response_text: b.response_text || b.reply_text || '',
+            keywords: b.keywords || (b.trigger_text ? b.trigger_text.split(',').map((s: string) => s.trim()) : ['help']),
+            caseSensitive: false,
+            actionType: (b.action_type || 'SEND_TEXT') as any,
+            replyText: b.reply_text || b.response_text || '',
+            hitCount: b.hit_count || 0,
+            isActive: b.is_active ?? true
+          })));
+        }
+      }
+    } catch (err) {
+      console.error('Error syncing with Supabase:', err);
+    } finally {
+      setIsSupabaseSyncing(false);
+    }
+  };
+
+  useEffect(() => {
+    syncWithSupabase();
+  }, []);
 
   // Helper for adding Audit Log
   const addAudit = (
@@ -333,12 +457,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     const compSlug = data.companyName.toLowerCase().replace(/[^a-z0-9]/g, '_').substring(0, 30);
     const companyCount = companies.length + 1;
-    const compUid = `CMP-${String(companyCount).padStart(6, '0')}`;
+    const compUid = `WC-${String(companyCount).padStart(6, '0')}`;
     const newCompanyId = `cmp_${compSlug}_${Date.now()}`;
 
     const plan = plans.find(p => p.id === data.planId) || plans[0];
     const initialMarketingQuota = plan.marketingCreditsQuota || 5000;
     const initialUtilityQuota = plan.utilityCreditsQuota || 2500;
+
+    // Generate permanent hardened master secret token on company creation ONLY
+    const hardSecretToken = generateHardenedSecretToken('wc_sec_live');
+    const webhookSecretToken = generateHardenedSecretToken('wc_sec_hook');
+    const campaignSecretToken = generateHardenedSecretToken('wc_sec_camp');
 
     const newComp: Company = {
       id: newCompanyId,
@@ -357,7 +486,63 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       currency: 'INR',
       cached_credit_balance: initialMarketingQuota + initialUtilityQuota,
       wabaAccountId: data.wabaMode === 'SANDBOX' ? `waba_sandbox_${Date.now()}` : undefined,
+      appId: '18920192039481',
+      appSecret: '',
+      webhookConnected: false, // Connection pending until verified!
+      hardSecretToken,
       createdAt: new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+    };
+
+    // Auto-generate multiple hardened secret API keys upon company creation
+    const masterApiKey: TenantApiKey = {
+      id: `key_${newCompanyId}_master`,
+      companyId: newCompanyId,
+      name: 'Master Hardened Secret Token',
+      keyPrefix: 'wc_sec_live',
+      tokenHash: Array.from(hardSecretToken).reduce((acc, char) => (acc * 31 + char.charCodeAt(0)) >>> 0, 0).toString(16).padStart(64, 'a'),
+      rawKeyOnce: hardSecretToken,
+      scopes: ['messages:send', 'templates:read', 'contacts:read', 'webhooks:listen'],
+      rateLimitRpm: data.rateLimitRpm || 300,
+      currentMinuteUsage: 0,
+      status: 'ACTIVE',
+      isHardenedSecret: true,
+      description: 'Permanent master high-entropy secret token generated at company provisioning',
+      expiresAt: '2030-01-01T00:00:00Z',
+      createdAt: new Date().toISOString()
+    };
+
+    const webhookApiKey: TenantApiKey = {
+      id: `key_${newCompanyId}_hook`,
+      companyId: newCompanyId,
+      name: 'Webhook Ingestion Hardened Secret',
+      keyPrefix: 'wc_sec_hook',
+      tokenHash: Array.from(webhookSecretToken).reduce((acc, char) => (acc * 31 + char.charCodeAt(0)) >>> 0, 0).toString(16).padStart(64, 'b'),
+      rawKeyOnce: webhookSecretToken,
+      scopes: ['webhooks:listen'],
+      rateLimitRpm: 1200,
+      currentMinuteUsage: 0,
+      status: 'ACTIVE',
+      isHardenedSecret: true,
+      description: 'Dedicated hardened secret for webhook subscription listening',
+      expiresAt: '2030-01-01T00:00:00Z',
+      createdAt: new Date().toISOString()
+    };
+
+    const campaignApiKey: TenantApiKey = {
+      id: `key_${newCompanyId}_camp`,
+      companyId: newCompanyId,
+      name: 'Campaign Dispatch Hardened Secret',
+      keyPrefix: 'wc_sec_camp',
+      tokenHash: Array.from(campaignSecretToken).reduce((acc, char) => (acc * 31 + char.charCodeAt(0)) >>> 0, 0).toString(16).padStart(64, 'c'),
+      rawKeyOnce: campaignSecretToken,
+      scopes: ['messages:send', 'templates:read'],
+      rateLimitRpm: 400,
+      currentMinuteUsage: 0,
+      status: 'ACTIVE',
+      isHardenedSecret: true,
+      description: 'Scoped hardened token for bulk campaign queue ingestion',
+      expiresAt: '2030-01-01T00:00:00Z',
+      createdAt: new Date().toISOString()
     };
 
     const newOwnerUser: User = {
@@ -387,6 +572,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setCompanies(prev => [newComp, ...prev]);
     setUsers(prev => [newOwnerUser, ...prev]);
     setWallets(prev => ({ ...prev, [newCompanyId]: newWallet }));
+    setApiKeys(prev => [masterApiKey, webhookApiKey, campaignApiKey, ...prev]);
 
     // Record welcome credit ledgers
     allocateCredits(newCompanyId, 'MARKETING', initialMarketingQuota, 'Plan Subscription Allocation');
@@ -1039,10 +1225,130 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return { success: true };
   };
 
+  const verifyWebhookConnection = async (companyId = currentCompany.id): Promise<{ success: boolean; message: string }> => {
+    const challengeCode = `hub_chal_${Math.random().toString(36).substring(2, 10)}`;
+    const targetComp = companies.find(c => c.id === companyId) || currentCompany;
+    const verifyToken = wabaConfig.webhookVerifyToken || 'webcraft_verify_token_whatsapp';
+    
+    // Simulate real handshake verification delay
+    await new Promise(resolve => setTimeout(resolve, 600));
+
+    // Update company state
+    setCompanies(prev => prev.map(c => c.id === companyId ? {
+      ...c,
+      webhookConnected: true,
+      webhookConnectedAt: new Date().toISOString()
+    } : c));
+
+    // Update WABA config if current company
+    if (companyId === currentCompany.id) {
+      setWabaConfig(prev => ({
+        ...prev,
+        webhookConnected: true,
+        webhookConnectedAt: new Date().toISOString()
+      }));
+    }
+
+    addAudit(
+      'WHATSAPP',
+      'WEBHOOK_VERIFIED',
+      `Meta Cloud API webhook handshake verified successfully for ${targetComp.name} with verify token "${verifyToken}". Status: CONNECTED.`,
+      companyId,
+      targetComp.name
+    );
+
+    return {
+      success: true,
+      message: `Webhook handshake successfully verified! Meta challenge (${challengeCode}) accepted. Status: CONNECTED.`
+    };
+  };
+
+  const resetWebhookVerification = (companyId = currentCompany.id) => {
+    setCompanies(prev => prev.map(c => c.id === companyId ? {
+      ...c,
+      webhookConnected: false,
+      webhookConnectedAt: undefined
+    } : c));
+
+    if (companyId === currentCompany.id) {
+      setWabaConfig(prev => ({
+        ...prev,
+        webhookConnected: false,
+        webhookConnectedAt: undefined
+      }));
+    }
+
+    addAudit(
+      'WHATSAPP',
+      'WEBHOOK_RESET',
+      `Webhook verification status reset to Connection Pending for testing & audit.`,
+      companyId
+    );
+  };
+
+  const updateCompanyAppCredentials = (appId: string, appSecret: string, companyId = currentCompany.id) => {
+    setCompanies(prev => prev.map(c => c.id === companyId ? {
+      ...c,
+      appId: appId.trim(),
+      appSecret: appSecret.trim()
+    } : c));
+
+    if (companyId === currentCompany.id) {
+      setWabaConfig(prev => ({
+        ...prev,
+        appId: appId.trim(),
+        appSecret: appSecret.trim(),
+        appSecretMasked: appSecret.trim() ? `${appSecret.trim().substring(0, 4)}...${appSecret.trim().substring(appSecret.trim().length - 4)}` : '••••••••'
+      }));
+      setAppSettings(prev => ({
+        ...prev,
+        metaAppId: appId.trim(),
+        metaAppSecret: appSecret.trim()
+      }));
+    }
+
+    addAudit('WHATSAPP', 'APP_SECRET_UPDATED', `Updated Meta App ID (${appId}) and App Secret credentials for company`, companyId);
+  };
+
+  const generateCompanyHardenedSecret = (name: string, scopes: string[], companyId = currentCompany.id): TenantApiKey => {
+    const rawSecret = generateHardenedSecretToken('wc_sec_live');
+    const prefix = rawSecret.substring(0, 11);
+    const tokenHash = Array.from(rawSecret).reduce((acc, char) => (acc * 31 + char.charCodeAt(0)) >>> 0, 0).toString(16).padStart(64, 'a');
+
+    const newKey: TenantApiKey = {
+      id: `key_${Date.now()}`,
+      companyId,
+      name,
+      keyPrefix: prefix,
+      tokenHash,
+      rawKeyOnce: rawSecret,
+      scopes,
+      rateLimitRpm: 300,
+      currentMinuteUsage: 0,
+      status: 'ACTIVE',
+      isHardenedSecret: true,
+      description: 'Hardened cryptographic bearer token generated for company',
+      expiresAt: new Date(Date.now() + 365 * 24 * 3600 * 1000).toISOString(),
+      createdAt: new Date().toISOString()
+    };
+
+    setApiKeys(prev => [newKey, ...prev]);
+    addAudit('API_CREDENTIAL', 'HARDENED_KEY_GENERATED', `Generated hardened secret token "${name}" with scopes [${scopes.join(', ')}]`, companyId);
+    return newKey;
+  };
+
   // Campaigns
   const createCampaign = (campaignData: any) => {
     const { name, category, templateId, templateName, recipients, batchSize, concurrency, sendRateMs, maxRetryAttempts, variableMapping } = campaignData;
     
+    // Safety check: ensure webhook handshake is connected before dispatching
+    if (!currentCompany.webhookConnected) {
+      return { 
+        success: false, 
+        error: 'Webhook connection is pending verification. Please verify your Meta webhook handshake in Apps & Company Settings or Cloud API Setup before dispatching live campaigns.' 
+      };
+    }
+
     const requiredCredits = recipients.length;
     const reservedOk = reserveCredits(
       currentCompany.id,
@@ -1424,9 +1730,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     utilityBonus: number
   ) => {
     const compId = `cmp_${Math.random().toString(36).substring(2, 8)}`;
+    const hardSecretToken = generateHardenedSecretToken('wc_sec_live');
+    const webhookSecretToken = generateHardenedSecretToken('wc_sec_hook');
+    const campaignSecretToken = generateHardenedSecretToken('wc_sec_camp');
+
     const newComp: Company = {
       id: compId,
-      company_uid: `CMP-00000${companies.length + 1}`,
+      company_uid: `WC-00000${companies.length + 1}`,
       name: companyData.name || 'New Company',
       code: companyData.code || `comp_${Date.now().toString().slice(-4)}`,
       status: 'active',
@@ -1440,10 +1750,67 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       timezone: companyData.timezone || 'Asia/Kolkata',
       currency: companyData.currency || 'INR',
       cached_credit_balance: marketingBonus + utilityBonus,
+      appId: '18920192039481',
+      appSecret: '',
+      webhookConnected: false,
+      hardSecretToken,
       createdAt: new Date().toLocaleString()
     };
 
+    // Auto-generate multiple hardened secret API keys upon company creation
+    const masterApiKey: TenantApiKey = {
+      id: `key_${compId}_master`,
+      companyId: compId,
+      name: 'Master Hardened Secret Token',
+      keyPrefix: 'wc_sec_live',
+      tokenHash: Array.from(hardSecretToken).reduce((acc, char) => (acc * 31 + char.charCodeAt(0)) >>> 0, 0).toString(16).padStart(64, 'a'),
+      rawKeyOnce: hardSecretToken,
+      scopes: ['messages:send', 'templates:read', 'contacts:read', 'webhooks:listen'],
+      rateLimitRpm: 600,
+      currentMinuteUsage: 0,
+      status: 'ACTIVE',
+      isHardenedSecret: true,
+      description: 'Permanent master high-entropy secret token generated at company provisioning',
+      expiresAt: '2030-01-01T00:00:00Z',
+      createdAt: new Date().toISOString()
+    };
+
+    const webhookApiKey: TenantApiKey = {
+      id: `key_${compId}_hook`,
+      companyId: compId,
+      name: 'Webhook Ingestion Hardened Secret',
+      keyPrefix: 'wc_sec_hook',
+      tokenHash: Array.from(webhookSecretToken).reduce((acc, char) => (acc * 31 + char.charCodeAt(0)) >>> 0, 0).toString(16).padStart(64, 'b'),
+      rawKeyOnce: webhookSecretToken,
+      scopes: ['webhooks:listen'],
+      rateLimitRpm: 1200,
+      currentMinuteUsage: 0,
+      status: 'ACTIVE',
+      isHardenedSecret: true,
+      description: 'Dedicated hardened secret for webhook subscription listening',
+      expiresAt: '2030-01-01T00:00:00Z',
+      createdAt: new Date().toISOString()
+    };
+
+    const campaignApiKey: TenantApiKey = {
+      id: `key_${compId}_camp`,
+      companyId: compId,
+      name: 'Campaign Dispatch Hardened Secret',
+      keyPrefix: 'wc_sec_camp',
+      tokenHash: Array.from(campaignSecretToken).reduce((acc, char) => (acc * 31 + char.charCodeAt(0)) >>> 0, 0).toString(16).padStart(64, 'c'),
+      rawKeyOnce: campaignSecretToken,
+      scopes: ['messages:send', 'templates:read'],
+      rateLimitRpm: 400,
+      currentMinuteUsage: 0,
+      status: 'ACTIVE',
+      isHardenedSecret: true,
+      description: 'Scoped hardened token for bulk campaign queue ingestion',
+      expiresAt: '2030-01-01T00:00:00Z',
+      createdAt: new Date().toISOString()
+    };
+
     setCompanies(prev => [...prev, newComp]);
+    setApiKeys(prev => [masterApiKey, webhookApiKey, campaignApiKey, ...prev]);
 
     setWallets(prev => ({
       ...prev,
@@ -1570,7 +1937,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         auditLogs,
         backgroundJobs,
         createNewCompany,
-        savePlan
+        savePlan,
+        supabaseStatus,
+        isSupabaseSyncing,
+        syncWithSupabase,
+        copySupabaseSqlFix,
+        verifyWebhookConnection,
+        resetWebhookVerification,
+        updateCompanyAppCredentials,
+        generateCompanyHardenedSecret
       }}
     >
       {children}

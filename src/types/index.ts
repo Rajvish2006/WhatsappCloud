@@ -65,6 +65,11 @@ export interface Company {
   wabaAccountId?: string;
   createdAt: string;
   suspensionReason?: string;
+  appSecret?: string;
+  appId?: string;
+  webhookConnected?: boolean;
+  webhookConnectedAt?: string;
+  hardSecretToken?: string;
 }
 
 export interface User {
@@ -100,6 +105,8 @@ export interface TenantApiKey {
   rateLimitRpm: number;
   currentMinuteUsage: number;
   status: 'ACTIVE' | 'REVOKED' | 'EXPIRED';
+  isHardenedSecret?: boolean;
+  description?: string;
   lastUsedAt?: string;
   expiresAt: string;
   createdAt: string;
@@ -116,7 +123,11 @@ export interface WABAConfig {
   accessTokenMasked: string;
   webhookVerifyToken: string;
   appSecretMasked: string;
+  appSecret?: string;
+  appId?: string;
   isConnected: boolean;
+  webhookConnected?: boolean;
+  webhookConnectedAt?: string;
   lastSyncedAt: string;
   callbackUrl?: string;
 }
@@ -360,6 +371,8 @@ export interface AppSettings {
   blacklistedPhoneNumbers: string;
   projectName: string;
   siteUrl: string;
+  metaAppSecret?: string;
+  metaAppId?: string;
 }
 
 export interface RegisterCompanyData {

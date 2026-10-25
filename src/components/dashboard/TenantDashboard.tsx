@@ -92,12 +92,23 @@ export const TenantDashboard: React.FC<TenantDashboardProps> = ({ onNavigate }) 
           <div>
             <div className="font-bold text-slate-900 flex items-center space-x-2">
               <span>WABA & Webhook Settlement Status</span>
-              <span className="bg-emerald-100 text-emerald-800 text-[10px] px-2 py-0.5 rounded font-bold">
+              <span className="bg-blue-100 text-blue-800 text-[10px] px-2 py-0.5 rounded font-bold">
                 Settled: {currentCompany.company_uid || currentCompany.code}
               </span>
+              {currentCompany.webhookConnected ? (
+                <span className="bg-emerald-100 text-emerald-800 text-[10px] px-2 py-0.5 rounded font-bold flex items-center space-x-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-600"></span>
+                  <span>Webhook: Connected</span>
+                </span>
+              ) : (
+                <span className="bg-amber-100 text-amber-800 text-[10px] px-2 py-0.5 rounded font-bold flex items-center space-x-1 animate-pulse">
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-600"></span>
+                  <span>Webhook: Connection Pending</span>
+                </span>
+              )}
             </div>
             <p className="text-slate-600 text-[11px] mt-0.5">
-              Webhook Endpoint: <code className="bg-white/80 px-1.5 py-0.5 rounded text-blue-700 font-mono">https://app.aspai.in/webhook/receive/{currentCompany.company_uid || currentCompany.code}</code> &bull; Anti-Spam Rate Limit Active
+              Webhook Endpoint: <code className="bg-white/80 px-1.5 py-0.5 rounded text-blue-700 font-mono">https://whatsappcloud-virid.vercel.app/api/webhook/{currentCompany.company_uid || currentCompany.code}</code> &bull; Anti-Spam Rate Limit Active
             </p>
           </div>
         </div>

@@ -32,7 +32,7 @@ export const WhatsAppIntegration: React.FC = () => {
 
   // Test Outbound State
   const [testToPhone, setTestToPhone] = useState('+14155552671');
-  const [testMessageText, setTestMessageText] = useState('Hello! This is a test message from OmniWABA Cloud API.');
+  const [testMessageText, setTestMessageText] = useState('Hello! This is a test message from Webcraft Solution WhatsApp Cloud API.');
   const [testOutboundCategory, setTestOutboundCategory] = useState<'UTILITY' | 'MARKETING'>('UTILITY');
   const [outboundStatus, setOutboundStatus] = useState<string | null>(null);
 

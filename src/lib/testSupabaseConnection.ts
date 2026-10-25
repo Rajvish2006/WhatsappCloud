@@ -1,20 +1,11 @@
-
-import { supabase } from "./supabase";
+import { checkSupabaseConnection } from './supabaseService';
 
 export async function testSupabaseConnection() {
-  const { error } = await supabase
-    .from("templates")
-    .select("id")
-    .limit(1);
-
-  if (error) {
-    console.error(
-      "Supabase connection test failed:",
-      error.message
-    );
+  const status = await checkSupabaseConnection();
+  if (!status.isConnected) {
+    console.warn("Supabase connection check warning:", status.error);
     return false;
   }
-
-  console.log("Supabase connection successful");
+  console.log("Supabase connection successful! Project URL:", status.projectUrl);
   return true;
 }

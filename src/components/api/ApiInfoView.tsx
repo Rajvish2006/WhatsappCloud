@@ -41,8 +41,8 @@ export const ApiInfoView: React.FC<ApiInfoViewProps> = ({
 
   // Active primary token or fallback
   const activeToken = apiKeys.find(k => k.status === 'ACTIVE') || apiKeys[0];
-  const endpointBase = 'https://app.aspai.in/api/v1';
-  const sampleBearer = activeToken ? `Bearer ${activeToken.tokenHash.substring(0, 32)}...` : 'Bearer G1K2RttZ8kFj99aBCx81924Lksq10294';
+  const endpointBase = 'https://whatsappcloud-virid.vercel.app/api/v1';
+  const sampleBearer = activeToken ? `Bearer ${activeToken.tokenHash.substring(0, 32)}...` : 'Bearer wc_live_79a2_89102948172938471029384710';
 
   // API campaigns (campaigns triggered via API or all campaigns)
   const [apiCampaignList, setApiCampaignList] = useState([

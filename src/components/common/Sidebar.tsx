@@ -1,5 +1,5 @@
 import React from 'react';
-import { AspLogo } from './AspLogo';
+import { WebcraftLogo } from './WebcraftLogo';
 import { useApp } from '../../context/AppContext';
 import { 
   LayoutDashboard, 
@@ -65,7 +65,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentTab, onSelectTab, onBac
     <aside className="w-64 bg-white border-r border-slate-200 flex flex-col shrink-0 min-h-[calc(100vh-3.5rem)] select-none">
       {/* Brand Logo Header */}
       <div className="p-4 border-b border-slate-100 flex items-center justify-between">
-        <AspLogo size="md" />
+        <WebcraftLogo size="md" />
       </div>
 
       {/* "Back to your account" Action Bar matching PDF Page 4 */}

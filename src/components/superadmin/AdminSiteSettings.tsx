@@ -16,15 +16,15 @@ export const AdminSiteSettings: React.FC = () => {
   const [saveSuccess, setSaveSuccess] = useState(false);
 
   // Form Fields
-  const [appName, setAppName] = useState('ASP Ai');
-  const [appTagline, setAppTagline] = useState('Connecting efficiencies');
-  const [appUrl, setAppUrl] = useState('https://app.aspai.in');
-  const [supportEmail, setSupportEmail] = useState('support@aspai.in');
+  const [appName, setAppName] = useState('Webcraft Solution');
+  const [appTagline, setAppTagline] = useState('WhatsApp Cloud API Platform');
+  const [appUrl, setAppUrl] = useState('https://whatsappcloud-virid.vercel.app');
+  const [supportEmail, setSupportEmail] = useState('vraj21712@gmail.com');
 
   // Finances
   const [currencySymbol, setCurrencySymbol] = useState('₹');
   const [currencyCode, setCurrencyCode] = useState('INR');
-  const [razorpayKey, setRazorpayKey] = useState('rzp_live_9920194812');
+  const [razorpayKey, setRazorpayKey] = useState('rzp_live_webcraft992');
   const [stripeSecret, setStripeSecret] = useState('sk_live_...encrypted');
 
   // Localization
@@ -39,12 +39,12 @@ export const AdminSiteSettings: React.FC = () => {
   // SMTP
   const [smtpHost, setSmtpHost] = useState('smtp.mailgun.org');
   const [smtpPort, setSmtpPort] = useState('587');
-  const [smtpUser, setSmtpUser] = useState('postmaster@aspai.in');
+  const [smtpUser, setSmtpUser] = useState('notifications@whatsappcloud-virid.vercel.app');
   const [smtpPass, setSmtpPass] = useState('••••••••••••');
 
   // Images
-  const [logoUrl, setLogoUrl] = useState('/asp_logo.svg');
-  const [faviconUrl, setFaviconUrl] = useState('/favicon.ico');
+  const [logoUrl, setLogoUrl] = useState('/assets/aistudio/Webcraft_Solution_Ribbon_Logo_577a10a3.png');
+  const [faviconUrl, setFaviconUrl] = useState('/assets/aistudio/Webcraft_Solution_Ribbon_Logo_577a10a3.png');
 
   // CSS & JS
   const [customCss, setCustomCss] = useState('/* Custom global tenant overrides */');

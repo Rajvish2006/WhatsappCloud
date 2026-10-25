@@ -1,5 +1,7 @@
 import React, { useState } from 'react';
 import { COMPLETE_SQL_DDL, SCHEMA_TABLES, SCHEMA_MIGRATIONS, SchemaTable } from '../../services/sqlSchema';
+import { SUPABASE_RLS_FIX_SQL } from '../../lib/supabaseService';
+import { useApp } from '../../context/AppContext';
 import { 
   Database, 
   Table, 
@@ -12,14 +14,17 @@ import {
   Layers, 
   Search, 
   ShieldCheck, 
-  SlidersHorizontal 
+  SlidersHorizontal,
+  RefreshCw
 } from 'lucide-react';
 
 export const DatabaseSchemaViewer: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'tables' | 'ddl' | 'migrations' | 'constraints'>('tables');
+  const { supabaseStatus, syncWithSupabase, isSupabaseSyncing } = useApp();
+  const [activeTab, setActiveTab] = useState<'tables' | 'ddl' | 'migrations' | 'constraints' | 'supabase'>('tables');
   const [selectedTable, setSelectedTable] = useState<SchemaTable>(SCHEMA_TABLES[0]);
   const [searchTableQuery, setSearchTableQuery] = useState('');
   const [copied, setCopied] = useState(false);
+  const [copiedSupabase, setCopiedSupabase] = useState(false);
 
   const filteredTables = SCHEMA_TABLES.filter(t => 
     t.name.toLowerCase().includes(searchTableQuery.toLowerCase()) ||
@@ -30,6 +35,12 @@ export const DatabaseSchemaViewer: React.FC = () => {
     navigator.clipboard.writeText(COMPLETE_SQL_DDL);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
+  };
+
+  const copySupabaseSQL = () => {
+    navigator.clipboard.writeText(SUPABASE_RLS_FIX_SQL);
+    setCopiedSupabase(true);
+    setTimeout(() => setCopiedSupabase(false), 2000);
   };
 
   const downloadDDL = () => {
@@ -127,6 +138,18 @@ export const DatabaseSchemaViewer: React.FC = () => {
         >
           <ShieldCheck className="w-4 h-4" />
           <span>Indexes & Idempotency Rules</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('supabase')}
+          className={`pb-3 flex items-center space-x-2 border-b-2 transition ${
+            activeTab === 'supabase'
+              ? 'border-emerald-500 text-emerald-400'
+              : 'border-transparent text-slate-400 hover:text-slate-200'
+          }`}
+        >
+          <Database className="w-4 h-4 text-emerald-400" />
+          <span>Supabase RLS & Direct Sync</span>
         </button>
       </div>
 
@@ -362,6 +385,56 @@ export const DatabaseSchemaViewer: React.FC = () => {
                   <code>CHECK (utility_total &gt;= (utility_reserved + utility_consumed))</code>. Ensures utility credits remain mathematically positive.
                 </p>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* TAB 5: SUPABASE RLS & DIRECT SYNC */}
+      {activeTab === 'supabase' && (
+        <div className="space-y-6">
+          <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-4">
+              <div>
+                <h3 className="text-base font-bold text-white flex items-center space-x-2">
+                  <Database className="w-5 h-5 text-emerald-400" />
+                  <span>Supabase Live Connection & RLS Policies</span>
+                </h3>
+                <p className="text-xs text-slate-400 mt-1">
+                  Connected Project Endpoint: <code className="text-emerald-400 font-mono">{supabaseStatus.projectUrl || 'Not Configured'}</code>
+                </p>
+              </div>
+
+              <div className="flex items-center space-x-2">
+                <button
+                  disabled={isSupabaseSyncing}
+                  onClick={() => syncWithSupabase()}
+                  className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white rounded-lg font-bold text-xs flex items-center space-x-1.5 transition cursor-pointer shadow-xs"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isSupabaseSyncing ? 'animate-spin' : ''}`} />
+                  <span>{isSupabaseSyncing ? 'Syncing...' : 'Sync Now'}</span>
+                </button>
+                <button
+                  onClick={copySupabaseSQL}
+                  className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-bold text-xs flex items-center space-x-1.5 transition cursor-pointer shadow-xs"
+                >
+                  {copiedSupabase ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                  <span>{copiedSupabase ? 'Copied SQL' : 'Copy Supabase SQL Fix'}</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Explanatory Banner */}
+            <div className="p-4 bg-emerald-950/40 border border-emerald-500/30 rounded-lg text-xs space-y-2 text-emerald-200">
+              <div className="font-bold text-sm text-emerald-300">How to Fix Supabase RLS for Direct CRM Writes:</div>
+              <p className="text-slate-300 leading-relaxed">
+                By default, Supabase enables Row-Level Security on newly created tables, which returns <code className="bg-slate-900 px-1 py-0.5 rounded text-amber-400">42501 Unauthorized</code> when client inserts are made without an authenticated Supabase Auth JWT. Run the SQL script below in your <strong>Supabase Dashboard &rarr; SQL Editor</strong> to grant full read/write permissions to the CRM.
+              </p>
+            </div>
+
+            {/* SQL Snippet View */}
+            <div className="relative rounded-lg bg-slate-950 border border-slate-800 p-4 font-mono text-xs text-slate-300 overflow-x-auto max-h-[360px]">
+              <pre>{SUPABASE_RLS_FIX_SQL}</pre>
             </div>
           </div>
         </div>
