@@ -17,6 +17,8 @@ import { BotsView } from './components/bots/BotsView';
 import { ApiInfoView } from './components/api/ApiInfoView';
 import { CloudApiSetupView } from './components/whatsapp/CloudApiSetupView';
 import { CompanySettingsView } from './components/settings/CompanySettingsView';
+import PrivacyPolicy from "@/component/policy-terms/privacy_policy";
+
 
 // Super Admin Views matching Page 1 & Page 10
 import { AdminPricingPlans } from './components/superadmin/AdminPricingPlans';
@@ -227,3 +229,8 @@ export default function App() {
     </AppProvider>
   );
 }
+
+export default function PrivacyPage() {
+  return <PrivacyPolicy />;
+}
+
