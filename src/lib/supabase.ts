@@ -1,17 +1,16 @@
 
-import { supabase } from "./supabase";
+import { createClient } from "@supabase/supabase-js";
 
-export async function testSupabaseConnection() {
-  const { error } = await supabase
-    .from("templates")
-    .select("id")
-    .limit(1);
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+const supabaseKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
 
-  if (error) {
-    console.error("Supabase connection test failed:", error.message);
-    return false;
-  }
-
-  console.log("Supabase connection successful");
-  return true;
+if (!supabaseUrl || !supabaseKey) {
+  throw new Error(
+    "Missing Supabase environment variables. Check your Vercel and local environment settings."
+  );
 }
+
+export const supabase = createClient(
+  supabaseUrl,
+  supabaseKey
+);
