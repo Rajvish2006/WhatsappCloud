@@ -42,13 +42,35 @@ export const Navbar: React.FC<NavbarProps> = ({ breadcrumb, onBackToAccount }) =
     supabaseStatus,
     isSupabaseSyncing,
     syncWithSupabase,
+    syncAllToSupabase,
     copySupabaseSqlFix
   } = useApp();
 
   const [isCompanyDropdownOpen, setIsCompanyDropdownOpen] = useState(false);
   const [isSupabaseModalOpen, setIsSupabaseModalOpen] = useState(false);
   const [copiedSql, setCopiedSql] = useState(false);
+  const [pushingAll, setPushingAll] = useState(false);
+  const [pushSummary, setPushSummary] = useState<string | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
+
+  const handlePushAll = async () => {
+    setPushingAll(true);
+    setPushSummary(null);
+    try {
+      const res = await syncAllToSupabase();
+      if (res.success) {
+        const total = Object.values(res.syncedCounts).reduce((a, b) => a + b, 0);
+        setPushSummary(`Successfully synced ${total} records across ${Object.keys(res.syncedCounts).length} tables!`);
+      } else {
+        setPushSummary(`Sync notice: ${Object.values(res.errors).slice(0, 2).join('; ') || 'Check RLS rules'}`);
+      }
+    } catch (e: any) {
+      setPushSummary(`Sync error: ${e.message}`);
+    } finally {
+      setPushingAll(false);
+      setTimeout(() => setPushSummary(null), 6000);
+    }
+  };
 
   const marketingAvail = currentWallet.marketingTotal - currentWallet.marketingReserved - currentWallet.marketingConsumed;
   const utilityAvail = currentWallet.utilityTotal - currentWallet.utilityReserved - currentWallet.utilityConsumed;
@@ -379,23 +401,72 @@ export const Navbar: React.FC<NavbarProps> = ({ breadcrumb, onBackToAccount }) =
                 </div>
               )}
 
+              {/* Two-Way Sync Actions */}
+              <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg space-y-2">
+                <div className="font-bold text-slate-800 flex items-center justify-between">
+                  <span>Full Platform Synchronization:</span>
+                  <span className="text-[10px] text-blue-700 font-semibold bg-white px-2 py-0.5 rounded border border-blue-200">
+                    Live 2-Way Sync
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-600">
+                  Share all 14 tables (companies, users, contacts, templates, campaigns, messages, bot rules, wallets & keys) directly with Supabase.
+                </p>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                  <button
+                    onClick={handlePushAll}
+                    disabled={pushingAll || isSupabaseSyncing}
+                    className="w-full py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-bold rounded-lg text-xs flex items-center justify-center space-x-1.5 transition cursor-pointer shadow-xs"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${pushingAll ? 'animate-spin' : ''}`} />
+                    <span>{pushingAll ? 'Pushing All Data...' : 'Push Everything to Supabase'}</span>
+                  </button>
+
+                  <button
+                    onClick={() => syncWithSupabase()}
+                    disabled={pushingAll || isSupabaseSyncing}
+                    className="w-full py-2 bg-slate-800 hover:bg-slate-900 disabled:opacity-50 text-white font-bold rounded-lg text-xs flex items-center justify-center space-x-1.5 transition cursor-pointer shadow-xs"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${isSupabaseSyncing ? 'animate-spin' : ''}`} />
+                    <span>{isSupabaseSyncing ? 'Pulling Data...' : 'Pull Everything from Supabase'}</span>
+                  </button>
+                </div>
+
+                {pushSummary && (
+                  <div className="p-2 rounded bg-emerald-100/80 border border-emerald-300 text-emerald-900 text-[11px] font-semibold flex items-center space-x-1.5 animate-in fade-in">
+                    <Check className="w-3.5 h-3.5 text-emerald-700 shrink-0" />
+                    <span>{pushSummary}</span>
+                  </div>
+                )}
+              </div>
+
               {/* Available Tables */}
               <div>
-                <div className="font-bold text-slate-700 mb-2">Detected Supabase Tables:</div>
+                <div className="font-bold text-slate-700 mb-2 flex items-center justify-between">
+                  <span>Detected Supabase Tables & Synced Rows:</span>
+                  <span className="text-[10px] text-slate-400">14 Tables Monitored</span>
+                </div>
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                  {Object.entries(supabaseStatus.tablesAvailable).map(([tbl, isAvail]) => (
-                    <div 
-                      key={tbl}
-                      className={`p-2 rounded border text-center ${
-                        isAvail 
-                          ? 'bg-emerald-50/70 border-emerald-200 text-emerald-800 font-semibold' 
-                          : 'bg-slate-100 border-slate-200 text-slate-400'
-                      }`}
-                    >
-                      <div className="font-mono text-[11px]">{tbl}</div>
-                      <div className="text-[9px] mt-0.5">{isAvail ? '✓ Ready' : '— Missing'}</div>
-                    </div>
-                  ))}
+                  {Object.entries(supabaseStatus.tablesAvailable).map(([tbl, isAvail]) => {
+                    const rowCount = supabaseStatus.tableCounts?.[tbl] ?? (isAvail ? 'Synced' : 0);
+                    return (
+                      <div 
+                        key={tbl}
+                        className={`p-2 rounded border text-center transition ${
+                          isAvail 
+                            ? 'bg-emerald-50/70 border-emerald-200 text-emerald-800 font-semibold' 
+                            : 'bg-slate-100 border-slate-200 text-slate-400'
+                        }`}
+                      >
+                        <div className="font-mono text-[11px] truncate" title={tbl}>{tbl}</div>
+                        <div className="text-[10px] mt-0.5 flex items-center justify-center space-x-1">
+                          <span>{isAvail ? '✓' : '—'}</span>
+                          <span className="font-bold font-mono">{typeof rowCount === 'number' ? `${rowCount} rows` : rowCount}</span>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             </div>
@@ -407,24 +478,16 @@ export const Navbar: React.FC<NavbarProps> = ({ breadcrumb, onBackToAccount }) =
                   setCopiedSql(true);
                   setTimeout(() => setCopiedSql(false), 2000);
                 }}
-                className="text-slate-600 hover:text-slate-900 font-medium text-xs flex items-center space-x-1"
+                className="text-slate-600 hover:text-slate-900 font-medium text-xs flex items-center space-x-1 cursor-pointer"
               >
                 <Copy className="w-3.5 h-3.5" />
-                <span>{copiedSql ? 'Copied SQL' : 'Copy SQL Fix'}</span>
+                <span>{copiedSql ? 'Copied Full SQL!' : 'Copy Full Table Creation & Permissions SQL'}</span>
               </button>
 
               <div className="flex items-center space-x-2">
                 <button
-                  disabled={isSupabaseSyncing}
-                  onClick={() => syncWithSupabase()}
-                  className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-lg font-bold text-xs flex items-center space-x-1.5 transition cursor-pointer shadow-xs"
-                >
-                  <RefreshCw className={`w-3.5 h-3.5 ${isSupabaseSyncing ? 'animate-spin' : ''}`} />
-                  <span>{isSupabaseSyncing ? 'Syncing...' : 'Sync Now'}</span>
-                </button>
-                <button
                   onClick={() => setIsSupabaseModalOpen(false)}
-                  className="px-3 py-1.5 bg-slate-200 hover:bg-slate-300 text-slate-800 rounded-lg font-semibold text-xs transition"
+                  className="px-4 py-1.5 bg-slate-200 hover:bg-slate-300 text-slate-800 rounded-lg font-semibold text-xs transition cursor-pointer"
                 >
                   Close
                 </button>

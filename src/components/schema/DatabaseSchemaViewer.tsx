@@ -15,16 +15,67 @@ import {
   Search, 
   ShieldCheck, 
   SlidersHorizontal,
-  RefreshCw
+  RefreshCw,
+  CloudUpload,
+  CloudDownload,
+  CheckCircle2,
+  AlertTriangle,
+  Server
 } from 'lucide-react';
 
 export const DatabaseSchemaViewer: React.FC = () => {
-  const { supabaseStatus, syncWithSupabase, isSupabaseSyncing } = useApp();
+  const { supabaseStatus, syncWithSupabase, syncAllToSupabase, isSupabaseSyncing } = useApp();
   const [activeTab, setActiveTab] = useState<'tables' | 'ddl' | 'migrations' | 'constraints' | 'supabase'>('tables');
   const [selectedTable, setSelectedTable] = useState<SchemaTable>(SCHEMA_TABLES[0]);
   const [searchTableQuery, setSearchTableQuery] = useState('');
   const [copied, setCopied] = useState(false);
   const [copiedSupabase, setCopiedSupabase] = useState(false);
+  const [isPushing, setIsPushing] = useState(false);
+  const [pushResult, setPushResult] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+
+  const handlePushAll = async () => {
+    setIsPushing(true);
+    setPushResult(null);
+    try {
+      const res = await syncAllToSupabase();
+      if (res.success) {
+        const total = Object.values(res.syncedCounts).reduce((a, b) => a + b, 0);
+        setPushResult({
+          message: `Successfully shared ${total} records across all 14 tables to Supabase!`,
+          type: 'success'
+        });
+      } else {
+        const errCount = Object.keys(res.errors).length;
+        setPushResult({
+          message: `Push completed with issues on ${errCount} table(s). Check RLS policies below.`,
+          type: 'error'
+        });
+      }
+    } catch (e: any) {
+      setPushResult({
+        message: e?.message || 'Error pushing to Supabase',
+        type: 'error'
+      });
+    } finally {
+      setIsPushing(false);
+    }
+  };
+
+  const handlePullAll = async () => {
+    setPushResult(null);
+    try {
+      await syncWithSupabase();
+      setPushResult({
+        message: 'Successfully pulled and refreshed latest data from Supabase!',
+        type: 'success'
+      });
+    } catch (e: any) {
+      setPushResult({
+        message: e?.message || 'Error pulling from Supabase',
+        type: 'error'
+      });
+    }
+  };
 
   const filteredTables = SCHEMA_TABLES.filter(t => 
     t.name.toLowerCase().includes(searchTableQuery.toLowerCase()) ||
@@ -393,42 +444,175 @@ export const DatabaseSchemaViewer: React.FC = () => {
       {/* TAB 5: SUPABASE RLS & DIRECT SYNC */}
       {activeTab === 'supabase' && (
         <div className="space-y-6">
+          {/* Main Sync Controls Card */}
           <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-4">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-4">
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-slate-800 pb-4">
               <div>
-                <h3 className="text-base font-bold text-white flex items-center space-x-2">
-                  <Database className="w-5 h-5 text-emerald-400" />
-                  <span>Supabase Live Connection & RLS Policies</span>
-                </h3>
+                <div className="flex items-center space-x-2">
+                  <span className={`w-2.5 h-2.5 rounded-full ${supabaseStatus.isConnected ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'}`} />
+                  <h3 className="text-base font-bold text-white flex items-center space-x-2">
+                    <Database className="w-5 h-5 text-emerald-400" />
+                    <span>Everything Sharing with Supabase (14 Tables Bidirectional Sync)</span>
+                  </h3>
+                </div>
                 <p className="text-xs text-slate-400 mt-1">
-                  Connected Project Endpoint: <code className="text-emerald-400 font-mono">{supabaseStatus.projectUrl || 'Not Configured'}</code>
+                  Connected Project: <code className="text-emerald-400 font-mono">{supabaseStatus.projectUrl || 'Not Configured'}</code>
+                  {supabaseStatus.lastCheckedAt && (
+                    <span className="text-slate-500 ml-2">| Verified: {new Date(supabaseStatus.lastCheckedAt).toLocaleTimeString()}</span>
+                  )}
                 </p>
               </div>
 
-              <div className="flex items-center space-x-2">
+              {/* Push & Pull Action Buttons */}
+              <div className="flex flex-wrap items-center gap-2">
                 <button
-                  disabled={isSupabaseSyncing}
-                  onClick={() => syncWithSupabase()}
-                  className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white rounded-lg font-bold text-xs flex items-center space-x-1.5 transition cursor-pointer shadow-xs"
+                  disabled={isPushing || isSupabaseSyncing}
+                  onClick={handlePushAll}
+                  className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-lg font-bold text-xs flex items-center space-x-2 transition cursor-pointer shadow-md shadow-emerald-950/40"
                 >
-                  <RefreshCw className={`w-3.5 h-3.5 ${isSupabaseSyncing ? 'animate-spin' : ''}`} />
-                  <span>{isSupabaseSyncing ? 'Syncing...' : 'Sync Now'}</span>
+                  <CloudUpload className={`w-4 h-4 ${isPushing ? 'animate-bounce' : ''}`} />
+                  <span>{isPushing ? 'Uploading All 14 Tables...' : 'Push Everything to Supabase'}</span>
                 </button>
+
+                <button
+                  disabled={isPushing || isSupabaseSyncing}
+                  onClick={handlePullAll}
+                  className="px-3.5 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white rounded-lg font-bold text-xs flex items-center space-x-2 transition cursor-pointer shadow-md shadow-blue-950/40"
+                >
+                  <CloudDownload className={`w-4 h-4 ${isSupabaseSyncing ? 'animate-spin' : ''}`} />
+                  <span>{isSupabaseSyncing ? 'Refreshing...' : 'Pull Everything from Supabase'}</span>
+                </button>
+
                 <button
                   onClick={copySupabaseSQL}
-                  className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-bold text-xs flex items-center space-x-1.5 transition cursor-pointer shadow-xs"
+                  className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-lg font-semibold text-xs flex items-center space-x-1.5 transition cursor-pointer"
                 >
-                  {copiedSupabase ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-                  <span>{copiedSupabase ? 'Copied SQL' : 'Copy Supabase SQL Fix'}</span>
+                  {copiedSupabase ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                  <span>{copiedSupabase ? 'Copied SQL Script' : 'Copy Full Setup SQL'}</span>
                 </button>
               </div>
             </div>
 
-            {/* Explanatory Banner */}
-            <div className="p-4 bg-emerald-950/40 border border-emerald-500/30 rounded-lg text-xs space-y-2 text-emerald-200">
-              <div className="font-bold text-sm text-emerald-300">How to Fix Supabase RLS for Direct CRM Writes:</div>
+            {/* Sync Feedback Message */}
+            {pushResult && (
+              <div className={`p-3.5 rounded-lg text-xs flex items-center justify-between ${
+                pushResult.type === 'success' 
+                  ? 'bg-emerald-950/60 border border-emerald-500/40 text-emerald-300' 
+                  : 'bg-amber-950/60 border border-amber-500/40 text-amber-300'
+              }`}>
+                <div className="flex items-center space-x-2">
+                  {pushResult.type === 'success' ? (
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                  ) : (
+                    <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+                  )}
+                  <span>{pushResult.message}</span>
+                </div>
+                <button 
+                  onClick={() => setPushResult(null)}
+                  className="text-slate-400 hover:text-white text-xs px-2 py-0.5"
+                >
+                  Dismiss
+                </button>
+              </div>
+            )}
+
+            {/* Quick Status Bar */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+              <div className="bg-slate-950 p-3 rounded-lg border border-slate-800">
+                <span className="text-slate-500 block text-[11px]">Configuration</span>
+                <span className="font-bold text-white flex items-center space-x-1 mt-0.5">
+                  <span className={`w-2 h-2 rounded-full ${supabaseStatus.isConfigured ? 'bg-emerald-400' : 'bg-red-400'}`} />
+                  <span>{supabaseStatus.isConfigured ? 'API Key Configured' : 'Missing URL/Key'}</span>
+                </span>
+              </div>
+              <div className="bg-slate-950 p-3 rounded-lg border border-slate-800">
+                <span className="text-slate-500 block text-[11px]">Database Ping</span>
+                <span className="font-bold text-white flex items-center space-x-1 mt-0.5">
+                  <span className={`w-2 h-2 rounded-full ${supabaseStatus.isConnected ? 'bg-emerald-400' : 'bg-amber-400'}`} />
+                  <span>{supabaseStatus.isConnected ? 'Online & Responsive' : 'Unreachable'}</span>
+                </span>
+              </div>
+              <div className="bg-slate-950 p-3 rounded-lg border border-slate-800">
+                <span className="text-slate-500 block text-[11px]">Active Tables</span>
+                <span className="font-bold text-emerald-400 mt-0.5 block">
+                  {Object.values(supabaseStatus.tablesAvailable || {}).filter(Boolean).length} / 14 Tables Ready
+                </span>
+              </div>
+              <div className="bg-slate-950 p-3 rounded-lg border border-slate-800">
+                <span className="text-slate-500 block text-[11px]">Real-Time Sync</span>
+                <span className="font-bold text-blue-400 mt-0.5 block">
+                  Auto-Sync on Mutations
+                </span>
+              </div>
+            </div>
+
+            {/* 14-Table Sync Matrix Grid */}
+            <div className="space-y-3 pt-2">
+              <div className="flex items-center justify-between">
+                <h4 className="text-xs font-bold uppercase tracking-wider text-slate-300 flex items-center space-x-1.5">
+                  <Server className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>All 14 Supabase Collections Sync Status</span>
+                </h4>
+                <span className="text-[11px] text-slate-400">
+                  Total Rows Recorded: {Object.values(supabaseStatus.tableCounts || {}).reduce((a, b) => a + b, 0)}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                {[
+                  { key: 'companies', label: 'companies', desc: 'Tenants, Meta credentials & webhook secret tokens' },
+                  { key: 'users', label: 'users', desc: 'Agents, admins, avatars, online statuses & roles' },
+                  { key: 'contacts', label: 'contacts', desc: 'Audience phones, opt-in consent & metadata' },
+                  { key: 'contact_groups', label: 'contact_groups', desc: 'Segmentation groups & filter queries' },
+                  { key: 'templates', label: 'templates', desc: 'Meta-approved WhatsApp message templates' },
+                  { key: 'campaigns', label: 'campaigns', desc: 'Broadcasts, schedules & analytics' },
+                  { key: 'messages', label: 'messages', desc: 'Chat messages, message IDs & delivery receipts' },
+                  { key: 'conversations', label: 'conversations', desc: '24-hour live chat sessions & agent assignments' },
+                  { key: 'bot_rules', label: 'bot_rules', desc: 'Keyword auto-replies & bot triggers' },
+                  { key: 'credit_wallets', label: 'credit_wallets', desc: 'Marketing & Utility balances and reservations' },
+                  { key: 'credit_ledger', label: 'credit_ledger', desc: 'Immutable financial audit entries & idempotency keys' },
+                  { key: 'tenant_api_keys', label: 'tenant_api_keys', desc: 'Hashed developer API credentials & scopes' },
+                  { key: 'audit_logs', label: 'audit_logs', desc: 'Security actions, auth logs & admin events' },
+                  { key: 'app_settings', label: 'app_settings', desc: 'Global platform settings & branding' },
+                ].map(item => {
+                  const isAvailable = (supabaseStatus.tablesAvailable as any)?.[item.key];
+                  const rowCount = supabaseStatus.tableCounts?.[item.key] ?? 0;
+
+                  return (
+                    <div 
+                      key={item.key}
+                      className="p-3 rounded-lg bg-slate-950 border border-slate-800 flex flex-col justify-between space-y-2 hover:border-slate-700 transition"
+                    >
+                      <div className="flex items-start justify-between">
+                        <span className="font-mono text-xs font-bold text-white flex items-center space-x-1.5">
+                          <Table className="w-3 h-3 text-emerald-400" />
+                          <span>{item.label}</span>
+                        </span>
+                        <span className={`text-[10px] font-mono px-2 py-0.5 rounded font-bold ${
+                          isAvailable 
+                            ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30' 
+                            : 'bg-amber-500/10 text-amber-400 border border-amber-500/30'
+                        }`}>
+                          {isAvailable ? `${rowCount} row${rowCount === 1 ? '' : 's'}` : 'Missing/RLS'}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-400 leading-tight">
+                        {item.desc}
+                      </p>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Explanatory Banner & SQL Fix */}
+            <div className="p-4 bg-emerald-950/40 border border-emerald-500/30 rounded-lg text-xs space-y-2 text-emerald-200 mt-4">
+              <div className="font-bold text-sm text-emerald-300">How Everything Shares with Supabase:</div>
               <p className="text-slate-300 leading-relaxed">
-                By default, Supabase enables Row-Level Security on newly created tables, which returns <code className="bg-slate-900 px-1 py-0.5 rounded text-amber-400">42501 Unauthorized</code> when client inserts are made without an authenticated Supabase Auth JWT. Run the SQL script below in your <strong>Supabase Dashboard &rarr; SQL Editor</strong> to grant full read/write permissions to the CRM.
+                1. <strong>Real-Time Mutations:</strong> Whenever you add contacts, launch campaigns, send chat messages, or update bot rules, OmniWABA automatically commits changes to Supabase in the background.<br />
+                2. <strong>One-Click Sync:</strong> Use <em>Push Everything to Supabase</em> to upload all pre-existing platform entities, or <em>Pull Everything</em> to pull recent records into the local view.<br />
+                3. <strong>Permissions & Schema Setup:</strong> If any table shows <code className="bg-slate-900 px-1 py-0.5 rounded text-amber-400">Missing/RLS</code>, copy the script below and paste it into your <strong>Supabase Dashboard &rarr; SQL Editor</strong> to create all tables and grant write access.
               </p>
             </div>
 

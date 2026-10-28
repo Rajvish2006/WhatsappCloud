@@ -367,7 +367,12 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentTab, onSelectTab, onBac
 
       {/* Footer matching Page 1 & Page 10 */}
       <div className="p-3 border-t border-slate-100 bg-slate-50/50 text-[10px] text-slate-400 flex items-center justify-between">
-        <span className="font-mono font-medium">VERSION 2.1.0</span>
+        <a 
+          href="#privacy" 
+          className="hover:text-blue-600 text-slate-500 transition underline font-medium cursor-pointer"
+        >
+          Privacy Policy
+        </a>
         <span className="text-emerald-600 font-semibold flex items-center space-x-1">
           <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
           <span>Online</span>

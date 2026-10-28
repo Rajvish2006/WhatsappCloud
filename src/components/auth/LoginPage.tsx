@@ -248,9 +248,15 @@ export const LoginPage: React.FC = () => {
         </div>
 
         {/* Security Disclaimers Footer */}
-       <div className="mt-5 text-center text-xs text-slate-400">
-          <ShieldCheck className="inline-block mr-1 h-4 w-4 text-emerald-500" />
-          Secure access · Webcraft Solution
+        <div className="mt-5 text-center text-xs text-slate-400 flex items-center justify-center space-x-2">
+          <span><ShieldCheck className="inline-block mr-1 h-4 w-4 text-emerald-500" /> Secure access · Webcraft Solution</span>
+          <span>•</span>
+          <a 
+            href="#privacy" 
+            className="text-slate-500 hover:text-blue-600 underline font-medium cursor-pointer"
+          >
+            Privacy Policy
+          </a>
         </div>
       </div>
 
