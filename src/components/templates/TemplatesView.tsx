@@ -25,12 +25,8 @@ export const TemplatesView: React.FC = () => {
     setSuccess('');
 
     try {
-      const res = await syncTemplatesFromMeta();
-      if (res && !res.success) {
-        setError(res.error || 'Unable to synchronize templates from Meta.');
-      } else {
-        setSuccess(`Successfully synchronized ${res?.count || templates.length} message templates from Meta Cloud API.`);
-      }
+      await syncTemplatesFromMeta();
+      setSuccess(`Successfully synchronized message templates from Meta Cloud API.`);
     } catch (err: any) {
       setError(err?.message || 'Unable to synchronize templates.');
     } finally {

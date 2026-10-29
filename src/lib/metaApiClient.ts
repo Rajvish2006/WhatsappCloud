@@ -200,3 +200,70 @@ export async function testServerVerifyToken(verifyToken: string): Promise<{
   });
   return res.json();
 }
+
+/**
+ * Save & update runtime credentials on the backend server
+ */
+export async function saveWhatsAppServerConfig(config: {
+  accessToken?: string;
+  phoneNumberId?: string;
+  wabaId?: string;
+  appId?: string;
+  appSecret?: string;
+  webhookVerifyToken?: string;
+  graphApiVersion?: string;
+}): Promise<{
+  success: boolean;
+  message: string;
+  isConfigured: boolean;
+  wabaId: string;
+  phoneNumberId: string;
+}> {
+  const res = await fetch('/api/whatsapp/config', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(config),
+  });
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data.error || 'Failed to update backend WhatsApp configuration');
+  }
+  return data;
+}
+
+/**
+ * Test & verify WhatsApp Cloud API connection live against Meta Graph API
+ */
+export async function verifyWhatsAppMetaConnection(credentials?: {
+  accessToken?: string;
+  phoneNumberId?: string;
+  wabaId?: string;
+  graphApiVersion?: string;
+}): Promise<{
+  success: boolean;
+  phoneNumber?: {
+    id: string;
+    verifiedName: string;
+    displayPhoneNumber: string;
+    qualityRating: string;
+    codeVerificationStatus?: string;
+  };
+  waba?: {
+    id: string;
+    name: string;
+    timezone?: string;
+    currency?: string;
+  };
+  error?: string;
+  errorCode?: number;
+  recommendation?: string;
+}> {
+  const res = await fetch('/api/whatsapp/verify-connection', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(credentials || {}),
+  });
+  const data = await res.json();
+  return data;
+}
+

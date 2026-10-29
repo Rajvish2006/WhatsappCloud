@@ -23,6 +23,7 @@ import {
   ArrowRight
 } from 'lucide-react';
 import { maskSecret } from '../../lib/tokenUtils';
+import { syncRecordAsync } from '../../lib/supabaseService';
 
 export const CompanySettingsView: React.FC = () => {
   const { 
@@ -92,8 +93,19 @@ export const CompanySettingsView: React.FC = () => {
   // Handle Meta Credentials Save
   const handleSaveAppCredentials = (e: React.FormEvent) => {
     e.preventDefault();
-    updateCompanyAppCredentials(appIdInput.trim(), appSecretInput.trim());
-    setSaveMessage('Meta App ID and App Secret updated successfully!');
+    const cleanAppId = appIdInput.trim();
+    const cleanAppSecret = appSecretInput.trim();
+    updateCompanyAppCredentials(cleanAppId, cleanAppSecret);
+
+    // Save directly to Supabase companies table
+    syncRecordAsync('companies', {
+      id: currentCompany.id,
+      app_id: cleanAppId,
+      app_secret: cleanAppSecret,
+      updated_at: new Date().toISOString()
+    });
+
+    setSaveMessage('Meta App ID and App Secret updated and synced to Supabase successfully!');
     setSaveSuccess(true);
     setTimeout(() => setSaveSuccess(false), 3000);
   };

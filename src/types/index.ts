@@ -63,6 +63,14 @@ export interface Company {
   currency: string;
   cached_credit_balance: number;
   wabaAccountId?: string;
+  wabaId?: string;
+  phoneNumberId?: string;
+  accessToken?: string;
+  webhookVerifyToken?: string;
+  graphApiVersion?: string;
+  displayPhoneNumber?: string;
+  verifiedName?: string;
+  qualityRating?: string;
   createdAt: string;
   suspensionReason?: string;
   appSecret?: string;
@@ -125,6 +133,8 @@ export interface WABAConfig {
   appSecretMasked: string;
   appSecret?: string;
   appId?: string;
+  accessToken?: string;
+  graphApiVersion?: string;
   isConnected: boolean;
   webhookConnected?: boolean;
   webhookConnectedAt?: string;

@@ -159,38 +159,34 @@ export const Navbar: React.FC<NavbarProps> = ({ breadcrumb, onBackToAccount }) =
 
           {/* DYNAMIC CLIENT & PERSONA SWITCHER (Replacing the static 2-button toggle from image) */}
           <div className="relative" ref={dropdownRef}>
-            <div className="flex items-center bg-slate-100 p-0.5 rounded-lg border border-slate-200 text-xs shadow-xs">
+            <div className="flex items-center bg-slate-100/90 p-1 rounded-xl border border-slate-200/90 text-xs shadow-xs">
               {/* Button 1: Super Admin */}
               <button
                 type="button"
                 onClick={handleSelectSuperAdmin}
-                className={`px-2.5 py-1 rounded-md text-[11px] font-semibold transition flex items-center space-x-1 cursor-pointer ${
+                className={`px-3 py-1 rounded-lg text-xs font-semibold transition cursor-pointer ${
                   isSuperAdmin && !impersonationState.isImpersonating
-                    ? 'bg-white text-purple-700 shadow-xs border border-purple-200 font-bold'
+                    ? 'bg-white text-slate-800 shadow-xs border border-slate-200 font-bold'
                     : 'text-slate-600 hover:text-slate-900'
                 }`}
+                title="Super Admin Control Console"
               >
-                <Crown className="w-3 h-3 text-purple-600" />
-                <span>Super Admin</span>
+                Super Admin
               </button>
 
-              {/* Button 2: Active Client / Dropdown for ALL Clients */}
+              {/* Button 2: Bijendra Sain (Tenant Admin / Organization Switcher) */}
               <button
                 type="button"
                 onClick={() => setIsCompanyDropdownOpen(!isCompanyDropdownOpen)}
-                className={`px-2.5 py-1 rounded-md text-[11px] font-semibold transition flex items-center space-x-1 cursor-pointer ${
+                className={`ml-1 px-3 py-1 rounded-lg text-xs font-bold transition flex items-center space-x-1.5 cursor-pointer ${
                   !isSuperAdmin || impersonationState.isImpersonating
                     ? 'bg-white text-emerald-700 shadow-xs border border-emerald-200 font-bold'
-                    : 'text-slate-600 hover:text-slate-900'
+                    : 'bg-white/90 text-emerald-700 hover:bg-white border border-slate-200/60'
                 }`}
+                title="Bijendra Sain - Webcraft Solution Tenant Admin"
               >
-                <Building2 className="w-3 h-3 text-emerald-600" />
-                <span className="max-w-[120px] truncate">
-                  {impersonationState.isImpersonating 
-                    ? currentCompany.name 
-                    : (!isSuperAdmin ? currentCompany.name : 'Client Accounts')}
-                </span>
-                <ChevronDown className="w-3 h-3 text-slate-400" />
+                <span>Bijendra Sain</span>
+                <ChevronDown className="w-3 h-3 text-emerald-600" />
               </button>
             </div>
 

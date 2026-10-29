@@ -89,7 +89,7 @@ export const INITIAL_COMPANIES: Company[] = [
     status: 'active',
     planId: 'plan_premium',
     planName: 'Professional Enterprise',
-    ownerName: 'Rajvish Patel',
+    ownerName: 'Bijendra Sain',
     ownerEmail: 'vraj21712@gmail.com',
     phone: '+91 98765 43210',
     mobile: '+91 98765 43210',
@@ -111,8 +111,8 @@ export const INITIAL_USERS: User[] = [
   {
     id: 'usr_superadmin',
     companyId: 'cmp_webcraft',
-    name: 'Webcraft Admin',
-    email: 'admin@webcraftsolution.com',
+    name: 'Bijendra Sain',
+    email: 'bijendra@webcraftsolution.com',
     mobile: '+91 98765 43210',
     role: 'super_admin',
     status: 'active',
@@ -123,7 +123,7 @@ export const INITIAL_USERS: User[] = [
   {
     id: 'usr_owner',
     companyId: 'cmp_webcraft',
-    name: 'Rajvish Patel',
+    name: 'Bijendra Sain',
     email: 'vraj21712@gmail.com',
     mobile: '+91 98765 43210',
     role: 'company_admin',

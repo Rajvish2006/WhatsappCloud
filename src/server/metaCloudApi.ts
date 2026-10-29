@@ -102,21 +102,35 @@ export interface MetaPhoneNumbersResponse {
   }>;
 }
 
+let activeRuntimeMetaConfig: Partial<MetaConfig> = {};
+
+export function updateRuntimeMetaConfig(newConfig: Partial<MetaConfig>): MetaConfig {
+  activeRuntimeMetaConfig = {
+    ...activeRuntimeMetaConfig,
+    ...newConfig
+  };
+  return getMetaConfig();
+}
+
+export function getRuntimeMetaConfig(): Partial<MetaConfig> {
+  return activeRuntimeMetaConfig;
+}
+
 /**
- * Retrieve server-side Meta configuration from environment variables
+ * Retrieve server-side Meta configuration from environment variables or active runtime config
  */
 export function getMetaConfig(overrides?: Partial<MetaConfig>): MetaConfig {
-  const graphApiVersion = process.env.META_GRAPH_API_VERSION || 'v22.0';
+  const graphApiVersion = overrides?.graphApiVersion || activeRuntimeMetaConfig.graphApiVersion || process.env.META_GRAPH_API_VERSION || 'v22.0';
   const baseUrl = `https://graph.facebook.com/${graphApiVersion}`;
 
   return {
     graphApiVersion,
     baseUrl,
-    accessToken: overrides?.accessToken || process.env.WHATSAPP_ACCESS_TOKEN || '',
-    wabaId: overrides?.wabaId || process.env.WHATSAPP_BUSINESS_ACCOUNT_ID || '',
-    phoneNumberId: overrides?.phoneNumberId || process.env.WHATSAPP_PHONE_NUMBER_ID || '',
-    appSecret: overrides?.appSecret || process.env.META_APP_SECRET || '',
-    webhookVerifyToken: overrides?.webhookVerifyToken || process.env.WHATSAPP_WEBHOOK_VERIFY_TOKEN || 'webcraft_verify_token_whatsapp',
+    accessToken: overrides?.accessToken || activeRuntimeMetaConfig.accessToken || process.env.WHATSAPP_ACCESS_TOKEN || '',
+    wabaId: overrides?.wabaId || activeRuntimeMetaConfig.wabaId || process.env.WHATSAPP_BUSINESS_ACCOUNT_ID || '',
+    phoneNumberId: overrides?.phoneNumberId || activeRuntimeMetaConfig.phoneNumberId || process.env.WHATSAPP_PHONE_NUMBER_ID || '',
+    appSecret: overrides?.appSecret || activeRuntimeMetaConfig.appSecret || process.env.META_APP_SECRET || '',
+    webhookVerifyToken: overrides?.webhookVerifyToken || activeRuntimeMetaConfig.webhookVerifyToken || process.env.WHATSAPP_WEBHOOK_VERIFY_TOKEN || 'webcraft_verify_token_whatsapp',
   };
 }
 
@@ -180,6 +194,108 @@ export function mapMetaError(errorData: MetaApiErrorResponse['error']): {
         message: msg,
         recommendation: 'Check Meta Cloud API status and your App permissions (whatsapp_business_management, whatsapp_business_messaging).',
       };
+  }
+}
+
+export interface MetaVerificationResult {
+  success: boolean;
+  phoneNumber?: {
+    id: string;
+    verifiedName: string;
+    displayPhoneNumber: string;
+    qualityRating: string;
+    codeVerificationStatus?: string;
+  };
+  waba?: {
+    id: string;
+    name: string;
+    timezone?: string;
+    currency?: string;
+  };
+  error?: string;
+  errorCode?: number;
+  recommendation?: string;
+}
+
+/**
+ * Verify credentials with Meta Graph API in real-time
+ */
+export async function verifyMetaCredentials(
+  config: MetaConfig
+): Promise<MetaVerificationResult> {
+  if (!config.accessToken) {
+    return {
+      success: false,
+      error: 'Access token is required to connect to Meta Graph API.',
+      recommendation: 'Please provide a valid permanent System User token from Meta Business Manager.',
+    };
+  }
+
+  try {
+    let phoneData: any = null;
+    let wabaData: any = null;
+
+    // 1. If Phone Number ID is provided, query it via Graph API
+    if (config.phoneNumberId) {
+      const phoneUrl = `${config.baseUrl}/${config.phoneNumberId}?fields=id,verified_name,display_phone_number,quality_rating,code_verification_status`;
+      const phoneRes = await fetch(phoneUrl, {
+        headers: { Authorization: `Bearer ${config.accessToken}` },
+      });
+      const phoneBody = await phoneRes.json();
+      if (!phoneRes.ok) {
+        const mapped = mapMetaError(phoneBody.error || { code: phoneRes.status, message: phoneRes.statusText, type: 'OAuthException' });
+        return {
+          success: false,
+          errorCode: mapped.code,
+          error: `Phone Number ID check failed: ${mapped.message}`,
+          recommendation: mapped.recommendation,
+        };
+      }
+      phoneData = {
+        id: phoneBody.id,
+        verifiedName: phoneBody.verified_name || 'Verified WhatsApp Business',
+        displayPhoneNumber: phoneBody.display_phone_number || config.phoneNumberId,
+        qualityRating: phoneBody.quality_rating || 'GREEN',
+        codeVerificationStatus: phoneBody.code_verification_status || 'VERIFIED',
+      };
+    }
+
+    // 2. If WABA ID is provided, query it via Graph API
+    if (config.wabaId) {
+      const wabaUrl = `${config.baseUrl}/${config.wabaId}?fields=id,name,timezone_id,currency`;
+      const wabaRes = await fetch(wabaUrl, {
+        headers: { Authorization: `Bearer ${config.accessToken}` },
+      });
+      const wabaBody = await wabaRes.json();
+      if (wabaRes.ok) {
+        wabaData = {
+          id: wabaBody.id,
+          name: wabaBody.name || 'WhatsApp Business Account',
+          timezone: wabaBody.timezone_id || 'Asia/Kolkata',
+          currency: wabaBody.currency || 'INR',
+        };
+      } else if (!config.phoneNumberId) {
+        const mapped = mapMetaError(wabaBody.error || { code: wabaRes.status, message: wabaRes.statusText, type: 'OAuthException' });
+        return {
+          success: false,
+          errorCode: mapped.code,
+          error: `WABA ID check failed: ${mapped.message}`,
+          recommendation: mapped.recommendation,
+        };
+      }
+    }
+
+    return {
+      success: true,
+      phoneNumber: phoneData,
+      waba: wabaData,
+    };
+  } catch (err: any) {
+    return {
+      success: false,
+      error: err?.message || 'Failed to connect to Meta Graph API.',
+      recommendation: 'Check server network connection and Meta status.',
+    };
   }
 }
 

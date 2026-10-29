@@ -4,6 +4,8 @@ import path from 'path';
 import dotenv from 'dotenv';
 import {
   getMetaConfig,
+  updateRuntimeMetaConfig,
+  verifyMetaCredentials,
   fetchTemplatesFromMeta,
   createTemplateInMeta,
   fetchPhoneNumbersFromMeta,
@@ -231,6 +233,62 @@ app.get('/api/whatsapp/config', (_req: Request, res: Response) => {
     accessTokenConfigured: Boolean(config.accessToken),
     callbackUrl: `/api/webhooks/whatsapp`,
   });
+});
+
+/**
+ * POST /api/whatsapp/config
+ * Updates runtime Meta Cloud API configuration on the server
+ */
+app.post('/api/whatsapp/config', (req: Request, res: Response) => {
+  const {
+    accessToken,
+    phoneNumberId,
+    wabaId,
+    appId,
+    appSecret,
+    webhookVerifyToken,
+    graphApiVersion,
+  } = req.body;
+
+  const updated = updateRuntimeMetaConfig({
+    ...(accessToken !== undefined && { accessToken: String(accessToken).trim() }),
+    ...(phoneNumberId !== undefined && { phoneNumberId: String(phoneNumberId).trim() }),
+    ...(wabaId !== undefined && { wabaId: String(wabaId).trim() }),
+    ...(appSecret !== undefined && { appSecret: String(appSecret).trim() }),
+    ...(webhookVerifyToken !== undefined && { webhookVerifyToken: String(webhookVerifyToken).trim() }),
+    ...(graphApiVersion !== undefined && { graphApiVersion: String(graphApiVersion).trim() }),
+  });
+
+  res.json({
+    success: true,
+    message: 'Backend server Meta configuration updated successfully.',
+    isConfigured: Boolean(updated.accessToken && updated.wabaId && updated.phoneNumberId),
+    graphApiVersion: updated.graphApiVersion,
+    wabaId: updated.wabaId,
+    phoneNumberId: updated.phoneNumberId,
+  });
+});
+
+/**
+ * POST /api/whatsapp/verify-connection
+ * Live test of WhatsApp Cloud API credentials against Meta Graph API
+ */
+app.post('/api/whatsapp/verify-connection', async (req: Request, res: Response) => {
+  const overrides = req.body || {};
+  const config = getMetaConfig(overrides);
+
+  const verification = await verifyMetaCredentials(config);
+
+  if (!verification.success) {
+    return res.status(400).json(verification);
+  }
+
+  // If verification succeeded and credentials were provided in the request body, persist them in runtime
+  if (req.body && (req.body.accessToken || req.body.phoneNumberId || req.body.wabaId)) {
+    updateRuntimeMetaConfig(overrides);
+  }
+
+  res.json(verification);
 });
 
 /**
