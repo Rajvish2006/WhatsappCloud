@@ -39,8 +39,7 @@ export const CloudApiSetupView: React.FC = () => {
   // Centralized Credentials State
   const [accessToken, setAccessToken] = useState(
     currentCompany.accessToken || 
-    (wabaConfig.accessTokenMasked && !wabaConfig.accessTokenMasked.includes('sample') ? wabaConfig.accessTokenMasked : '') ||
-    'EAAG9x82l10...sample_permanent_token'
+    (wabaConfig.accessTokenMasked && !wabaConfig.accessTokenMasked.includes('sample') ? wabaConfig.accessTokenMasked : '')
   );
   const [phoneNumberId, setPhoneNumberId] = useState(currentCompany.phoneNumberId || wabaConfig.phoneNumberId || '102938475618293');
   const [wabaId, setWabaId] = useState(currentCompany.wabaId || wabaConfig.wabaId || '108920192837461');
@@ -184,13 +183,24 @@ export const CloudApiSetupView: React.FC = () => {
 
   // Test & Verify live with Meta Graph API
   const handleVerifyWithMeta = async () => {
+    const cleanToken = accessToken.trim();
+    if (!cleanToken || cleanToken.includes('sample_permanent_token')) {
+      setMetaError('Meta Permanent Access Token is required to test the Graph API. Please paste your token starting with EAAG... above.');
+      return;
+    }
+
+    if (!phoneNumberId.trim() && !wabaId.trim()) {
+      setMetaError('Please enter a Phone Number ID or WABA ID to test against Meta Graph API.');
+      return;
+    }
+
     setIsVerifyingMeta(true);
     setMetaError(null);
     setMetaVerificationResult(null);
 
     try {
       const res = await verifyWhatsAppMetaConnection({
-        accessToken: accessToken.trim(),
+        accessToken: cleanToken,
         phoneNumberId: phoneNumberId.trim(),
         wabaId: wabaId.trim(),
         graphApiVersion
@@ -199,7 +209,9 @@ export const CloudApiSetupView: React.FC = () => {
       if (res.success) {
         setMetaVerificationResult(res);
       } else {
-        setMetaError(res.error || 'Meta Graph API returned an error.');
+        const errorText = res.error || 'Meta Graph API returned an error.';
+        const recText = res.recommendation ? ` (${res.recommendation})` : '';
+        setMetaError(`${errorText}${recText}`);
       }
     } catch (err: any) {
       setMetaError(err?.message || 'Network failure connecting to Meta Graph API.');
