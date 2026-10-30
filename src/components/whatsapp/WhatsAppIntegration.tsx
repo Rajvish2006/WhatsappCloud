@@ -47,10 +47,10 @@ export const WhatsAppIntegration: React.FC = () => {
   const [simValidHmac, setSimValidHmac] = useState(true);
   const [webhookLog, setWebhookLog] = useState<string | null>(null);
 
-  const handleSyncClick = () => {
+  const handleSyncClick = async () => {
     setIsSyncing(true);
-    syncTemplatesFromMeta();
-    setTimeout(() => setIsSyncing(false), 900);
+    await syncTemplatesFromMeta();
+    setIsSyncing(false);
   };
 
   const handleSendTestOutbound = async (e: React.FormEvent) => {

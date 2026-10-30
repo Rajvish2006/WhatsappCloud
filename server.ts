@@ -45,7 +45,29 @@ interface WebhookEventLog {
   signatureValid: boolean;
 }
 
+export interface InboundChatMessage {
+  id: string;
+  wamid: string;
+  from: string;
+  contactName: string;
+  text: string;
+  type: string;
+  timestamp: string;
+  rawTimestamp?: string | number;
+}
+
 const webhookEventsBuffer: WebhookEventLog[] = [];
+const inboundMessagesStore: InboundChatMessage[] = [];
+
+function recordInboundMessage(item: InboundChatMessage) {
+  const exists = inboundMessagesStore.some(m => m.wamid === item.wamid);
+  if (!exists) {
+    inboundMessagesStore.unshift(item);
+    if (inboundMessagesStore.length > 200) {
+      inboundMessagesStore.pop();
+    }
+  }
+}
 
 function recordWebhookEvent(event: Omit<WebhookEventLog, 'id' | 'timestamp'>) {
   const item: WebhookEventLog = {
@@ -196,6 +218,20 @@ const webhookPostHandler = (req: any, res: Response) => {
             const contactName = value.contacts?.[0]?.profile?.name || 'WhatsApp Contact';
 
             console.log(`[Webhook] Inbound message from ${from} (${contactName}): ${text}`);
+            
+            // Record structured message for real-time frontend chat polling
+            const messageIso = msg.timestamp ? new Date(Number(msg.timestamp) * 1000).toISOString() : new Date().toISOString();
+            recordInboundMessage({
+              id: wamid || `wamid_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+              wamid: wamid || `wamid_${Date.now()}`,
+              from,
+              contactName,
+              text,
+              type: type || 'text',
+              timestamp: messageIso,
+              rawTimestamp: msg.timestamp,
+            });
+
             recordWebhookEvent({
               type: 'INBOUND_MESSAGE',
               wamid,
@@ -361,7 +397,14 @@ app.post('/api/whatsapp/display-name', async (req: Request, res: Response) => {
  */
 app.get('/api/whatsapp/templates', async (req: Request, res: Response) => {
   const cursorAfter = req.query.after as string | undefined;
-  const config = getMetaConfig();
+  const clientWabaId = (req.query.wabaId as string | undefined)?.trim();
+  const clientAuth = req.headers.authorization?.replace(/^Bearer\s+/i, '').trim();
+
+  const overrides: any = {};
+  if (clientWabaId) overrides.wabaId = clientWabaId;
+  if (clientAuth && !clientAuth.includes('sample')) overrides.accessToken = clientAuth;
+
+  const config = getMetaConfig(overrides);
 
   const result = await fetchTemplatesFromMeta(config, cursorAfter);
   if (!result.success) {
@@ -379,12 +422,17 @@ app.get('/api/whatsapp/templates', async (req: Request, res: Response) => {
  * Creates a message template in Meta Graph API
  */
 app.post('/api/whatsapp/templates', async (req: Request, res: Response) => {
-  const { name, category, language, components } = req.body;
+  const { name, category, language, components, wabaId, accessToken } = req.body;
   if (!name || !category || !language || !components) {
     return res.status(400).json({ error: 'Missing required template fields (name, category, language, components)' });
   }
 
-  const config = getMetaConfig();
+  const clientAuth = (accessToken || req.headers.authorization?.replace(/^Bearer\s+/i, ''))?.trim();
+  const overrides: any = {};
+  if (wabaId && String(wabaId).trim()) overrides.wabaId = String(wabaId).trim();
+  if (clientAuth && !clientAuth.includes('sample')) overrides.accessToken = clientAuth;
+
+  const config = getMetaConfig(overrides);
   const result = await createTemplateInMeta(config, { name, category, language, components });
 
   if (!result.success) {
@@ -543,6 +591,91 @@ app.get('/api/whatsapp/webhook-events', (_req: Request, res: Response) => {
     total: webhookEventsBuffer.length,
     events: webhookEventsBuffer,
   });
+});
+
+/**
+ * GET /api/whatsapp/inbound-events
+ * Returns incoming WhatsApp messages & events for real-time CRM chat sync
+ */
+app.get('/api/whatsapp/inbound-events', (req: Request, res: Response) => {
+  const since = req.query.since as string | undefined;
+  const sinceTime = since ? new Date(since).getTime() : 0;
+
+  const filteredEvents = sinceTime > 0
+    ? webhookEventsBuffer.filter(e => new Date(e.timestamp).getTime() > sinceTime)
+    : webhookEventsBuffer.slice(0, 50);
+
+  const filteredMessages = sinceTime > 0
+    ? inboundMessagesStore.filter(m => new Date(m.timestamp).getTime() > sinceTime)
+    : inboundMessagesStore.slice(0, 50);
+
+  res.json({
+    success: true,
+    totalEvents: webhookEventsBuffer.length,
+    totalMessages: inboundMessagesStore.length,
+    events: filteredEvents,
+    messages: filteredMessages,
+    latestTimestamp: new Date().toISOString(),
+  });
+});
+
+/**
+ * POST /api/whatsapp/simulate-inbound
+ * Diagnostic & testing endpoint to simulate customer inbound WhatsApp messages
+ */
+app.post('/api/whatsapp/simulate-inbound', (req: Request, res: Response) => {
+  const { phone, name, text, type } = req.body;
+  if (!phone || !text) {
+    return res.status(400).json({ error: 'phone and text are required to simulate an inbound message.' });
+  }
+
+  const cleanPhone = String(phone).replace(/[^0-9+]/g, '');
+  const contactName = name ? String(name).trim() : 'WhatsApp Customer';
+  const msgText = String(text).trim();
+  const wamid = `wamid.HBgL${Math.random().toString(36).substring(2, 10).toUpperCase()}`;
+  const nowIso = new Date().toISOString();
+
+  const msgItem: InboundChatMessage = {
+    id: wamid,
+    wamid,
+    from: cleanPhone,
+    contactName,
+    text: msgText,
+    type: type || 'text',
+    timestamp: nowIso,
+  };
+
+  recordInboundMessage(msgItem);
+  recordWebhookEvent({
+    type: 'INBOUND_MESSAGE',
+    wamid,
+    from: cleanPhone,
+    details: {
+      contactName,
+      type: type || 'text',
+      text: msgText,
+      timestamp: Math.floor(Date.now() / 1000),
+      simulated: true,
+    },
+    signatureValid: true,
+  });
+
+  console.log(`[Simulate Inbound] Processed test message from ${cleanPhone} (${contactName}): "${msgText}"`);
+
+  res.json({
+    success: true,
+    message: `Inbound WhatsApp message simulated from ${cleanPhone} (${contactName})`,
+    inboundMessage: msgItem,
+  });
+});
+
+/**
+ * POST /api/whatsapp/inbound-events/clear
+ * Clears buffered inbound messages
+ */
+app.post('/api/whatsapp/inbound-events/clear', (_req: Request, res: Response) => {
+  inboundMessagesStore.length = 0;
+  res.json({ success: true, message: 'Inbound message buffer cleared.' });
 });
 
 /**

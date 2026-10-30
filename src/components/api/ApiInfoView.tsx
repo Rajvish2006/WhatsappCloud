@@ -43,6 +43,7 @@ export const ApiInfoView: React.FC<ApiInfoViewProps> = ({
   const activeToken = apiKeys.find(k => k.status === 'ACTIVE') || apiKeys[0];
   const endpointBase = 'https://whatsappcloud-virid.vercel.app/api/v1';
   const sampleBearer = activeToken ? `Bearer ${activeToken.tokenHash.substring(0, 32)}...` : 'Bearer wc_live_79a2_89102948172938471029384710';
+  const [apiNotification, setApiNotification] = useState<string | null>(null);
 
   // API campaigns (campaigns triggered via API or all campaigns)
   const [apiCampaignList, setApiCampaignList] = useState([
@@ -106,6 +107,18 @@ export const ApiInfoView: React.FC<ApiInfoViewProps> = ({
 
   return (
     <div className="p-6 max-w-7xl mx-auto space-y-6">
+      {apiNotification && (
+        <div className="p-3.5 rounded-lg bg-blue-50 border border-blue-200 text-blue-900 text-xs flex items-center justify-between shadow-2xs">
+          <span>{apiNotification}</span>
+          <button
+            onClick={() => setApiNotification(null)}
+            className="text-blue-500 hover:text-blue-700 font-bold ml-2 cursor-pointer"
+          >
+            &times;
+          </button>
+        </div>
+      )}
+
       {/* Sub Header Navigation matching Page 6 Bottom & Page 7 Top */}
       <div className="flex items-center justify-between border-b border-slate-200 pb-4">
         <div>
@@ -219,9 +232,9 @@ export const ApiInfoView: React.FC<ApiInfoViewProps> = ({
                   href="#docs"
                   onClick={(e) => {
                     e.preventDefault();
-                    alert("API Documentation: Send POST to /api/v1/messages with JSON body { recipient: '+919811111111', template_name: 'safe4sign_login_otp', variables: ['123456'] }");
+                    setApiNotification("API Documentation: Send POST to /api/v1/messages with JSON body { recipient: '+919811111111', template_name: 'safe4sign_login_otp', variables: ['123456'] }");
                   }}
-                  className="px-4 py-2 bg-white border border-slate-300 text-slate-700 hover:bg-slate-50 text-xs font-semibold rounded-lg transition inline-flex items-center space-x-1.5"
+                  className="px-4 py-2 bg-white border border-slate-300 text-slate-700 hover:bg-slate-50 text-xs font-semibold rounded-lg transition inline-flex items-center space-x-1.5 cursor-pointer"
                 >
                   <span>Documentation</span>
                   <ExternalLink className="w-3.5 h-3.5 text-slate-400" />
@@ -344,8 +357,8 @@ export const ApiInfoView: React.FC<ApiInfoViewProps> = ({
                     <td className="py-4 px-6 text-right space-x-2">
                       {/* Analytics Button matching Page 7 Top */}
                       <button
-                        onClick={() => alert(`Analytics for ${camp.name}: Delivered ${camp.deliveredRate}, Total Sent ${camp.totalSent}`)}
-                        className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded text-xs font-semibold transition inline-flex items-center space-x-1"
+                        onClick={() => setApiNotification(`Analytics for "${camp.name}": Delivered Rate ${camp.deliveredRate}, Total Sent: ${camp.totalSent.toLocaleString()} messages.`)}
+                        className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded text-xs font-semibold transition inline-flex items-center space-x-1 cursor-pointer"
                       >
                         <BarChart3 className="w-3.5 h-3.5" />
                         <span>Analytics</span>

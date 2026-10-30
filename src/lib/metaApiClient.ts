@@ -271,14 +271,31 @@ export async function fetchWhatsAppServerConfig(): Promise<WhatsAppServerConfig>
 export async function fetchServerTemplates(after?: string, fallbackWabaId?: string, fallbackToken?: string): Promise<{
   templates: ServerMetaTemplate[];
   nextCursor?: string;
+  error?: string;
 }> {
   try {
-    const url = after ? `/api/whatsapp/templates?after=${encodeURIComponent(after)}` : '/api/whatsapp/templates';
-    const res = await fetch(url);
+    const params = new URLSearchParams();
+    if (after) params.append('after', after);
+    if (fallbackWabaId) params.append('wabaId', fallbackWabaId);
+
+    const headers: Record<string, string> = {};
+    if (fallbackToken && !fallbackToken.includes('sample')) {
+      headers['Authorization'] = `Bearer ${fallbackToken}`;
+    }
+
+    const url = `/api/whatsapp/templates${params.toString() ? `?${params.toString()}` : ''}`;
+    const res = await fetch(url, { headers });
     const parsed = await safeParseResponse(res);
 
     if (res.ok && parsed.isJson && parsed.data?.templates) {
-      return parsed.data;
+      return {
+        templates: parsed.data.templates,
+        nextCursor: parsed.data.nextCursor,
+      };
+    }
+
+    if (!res.ok && parsed.data?.error) {
+      console.warn('Server template proxy error:', parsed.data.error);
     }
   } catch (err) {
     console.warn('Backend proxy templates fetch failed, checking direct Meta API:', err);
@@ -298,8 +315,18 @@ export async function fetchServerTemplates(after?: string, fallbackWabaId?: stri
           nextCursor: parsed.data.paging?.cursors?.after,
         };
       }
-    } catch (e) {
+      if (!metaRes.ok && parsed.data?.error?.message) {
+        return {
+          templates: [],
+          error: parsed.data.error.message,
+        };
+      }
+    } catch (e: any) {
       console.warn('Direct Meta templates fetch failed:', e);
+      return {
+        templates: [],
+        error: e.message || 'Direct Meta templates connection failed.',
+      };
     }
   }
 
@@ -521,6 +548,73 @@ export async function fetchServerWebhookEvents(): Promise<{
     }
   } catch {}
   return { total: 0, events: [] };
+}
+
+export interface InboundMessageSyncResponse {
+  success: boolean;
+  totalEvents: number;
+  totalMessages: number;
+  events: WebhookEventRecord[];
+  messages: Array<{
+    id: string;
+    wamid: string;
+    from: string;
+    contactName: string;
+    text: string;
+    type: string;
+    timestamp: string;
+  }>;
+  latestTimestamp: string;
+}
+
+/**
+ * Fetch inbound messages and delivery events from server for live chat synchronization
+ */
+export async function fetchInboundWebhookEvents(since?: string): Promise<InboundMessageSyncResponse> {
+  try {
+    const url = since
+      ? `/api/whatsapp/inbound-events?since=${encodeURIComponent(since)}`
+      : '/api/whatsapp/inbound-events';
+    const res = await fetch(url);
+    const parsed = await safeParseResponse(res);
+    if (res.ok && parsed.isJson && parsed.data?.success) {
+      return parsed.data;
+    }
+  } catch (err) {
+    console.warn('Inbound webhook polling error:', err);
+  }
+  return {
+    success: false,
+    totalEvents: 0,
+    totalMessages: 0,
+    events: [],
+    messages: [],
+    latestTimestamp: new Date().toISOString(),
+  };
+}
+
+/**
+ * Simulate inbound message for testing Live Chat webhook ingestion
+ */
+export async function simulateInboundWebhookMessage(
+  phone: string,
+  name: string,
+  text: string
+): Promise<{ success: boolean; message: string; inboundMessage?: any }> {
+  try {
+    const res = await fetch('/api/whatsapp/simulate-inbound', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ phone, name, text }),
+    });
+    const parsed = await safeParseResponse(res);
+    if (res.ok && parsed.isJson) {
+      return parsed.data;
+    }
+  } catch (err: any) {
+    return { success: false, message: err?.message || 'Failed to simulate inbound message' };
+  }
+  return { success: false, message: 'Server did not respond with success' };
 }
 
 /**

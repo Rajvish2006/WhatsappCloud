@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react';
 import {
   Company,
   User,
@@ -38,7 +38,10 @@ import { generateHardenedSecretToken } from '../lib/tokenUtils';
 import { 
   saveWhatsAppServerConfig, 
   verifyWhatsAppMetaConnection, 
-  fetchServerTemplates 
+  fetchServerTemplates,
+  fetchInboundWebhookEvents,
+  simulateInboundWebhookMessage,
+  sendServerWhatsAppMessage
 } from '../lib/metaApiClient';
 import {
   INITIAL_COMPANIES,
@@ -130,7 +133,9 @@ interface AppContextType {
   wabaConfig: WABAConfig;
   templates: MetaTemplate[];
   updateWabaConfig: (updates: Partial<WABAConfig>) => void;
-  syncTemplatesFromMeta: () => void;
+  syncTemplatesFromMeta: () => Promise<{ success: boolean; count: number; error?: string; templates?: MetaTemplate[] }>;
+  syncInboundWebhookMessages: () => Promise<void>;
+  simulateCustomerInboundMessage: (phone: string, name: string, text: string) => Promise<{ success: boolean; message: string }>;
   simulateIncomingWebhook: (type: 'MESSAGE' | 'STATUS_UPDATE', payload: any, verifySignature?: boolean) => { success: boolean; log: string };
   sendTestOutboundMessage: (toPhone: string, text: string, category?: CreditCategory) => { success: boolean; error?: string; wamid?: string };
   verifyWebhookConnection: (companyId?: string) => Promise<{ success: boolean; message: string }>;
@@ -231,7 +236,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // WhatsApp Config & Templates
   const [wabaConfig, setWabaConfig] = useState<WABAConfig>(INITIAL_WABA_CONFIG);
-  const [templates, setTemplates] = useState<MetaTemplate[]>(INITIAL_TEMPLATES);
+  const [templates, setTemplates] = useState<MetaTemplate[]>(() => {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      try {
+        const cached = window.localStorage.getItem('omniwaba_templates_cache');
+        if (cached) {
+          const parsed = JSON.parse(cached);
+          if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        }
+      } catch {}
+    }
+    return INITIAL_TEMPLATES;
+  });
 
   // Audience & Contacts
   const [contacts, setContacts] = useState<Contact[]>(INITIAL_CONTACTS);
@@ -241,8 +257,31 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [campaigns, setCampaigns] = useState<Campaign[]>(INITIAL_CAMPAIGNS);
 
   // Chat & Bots
-  const [conversations, setConversations] = useState<ChatConversation[]>(INITIAL_CONVERSATIONS);
-  const [messages, setMessages] = useState<Record<string, ChatMessage[]>>(INITIAL_MESSAGES);
+  const [conversations, setConversations] = useState<ChatConversation[]>(() => {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      try {
+        const cached = window.localStorage.getItem('omniwaba_conversations_cache');
+        if (cached) {
+          const parsed = JSON.parse(cached);
+          if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        }
+      } catch {}
+    }
+    return INITIAL_CONVERSATIONS;
+  });
+
+  const [messages, setMessages] = useState<Record<string, ChatMessage[]>>(() => {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      try {
+        const cached = window.localStorage.getItem('omniwaba_messages_cache');
+        if (cached) {
+          const parsed = JSON.parse(cached);
+          if (parsed && typeof parsed === 'object') return parsed;
+        }
+      } catch {}
+    }
+    return INITIAL_MESSAGES;
+  });
   const [internalNotes, setInternalNotes] = useState<Record<string, InternalNote[]>>(INITIAL_INTERNAL_NOTES);
   const [botRules, setBotRules] = useState<BotAutomationRule[]>(INITIAL_BOT_RULES);
   const [activeConversationId, setActiveConversationId] = useState<string | null>('conv_001');
@@ -1346,25 +1385,153 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
   };
 
-  const syncTemplatesFromMeta = () => {
+  const syncTemplatesFromMeta = async (): Promise<{
+    success: boolean;
+    count: number;
+    error?: string;
+    templates?: MetaTemplate[];
+  }> => {
     const job: BackgroundJob = {
       id: `job_${Date.now()}`,
       companyId: currentCompany.id,
       type: 'TEMPLATE_SYNC',
       status: 'PROCESSING',
-      progress: 50,
-      payloadDescription: `Syncing message templates with Meta Cloud API Graph v21.0 (${wabaConfig.wabaId})`,
+      progress: 30,
+      payloadDescription: `Syncing message templates with Meta Cloud API (${wabaConfig.wabaId || 'Configured WABA'})`,
       attempts: 1,
       maxAttempts: 3,
       createdAt: new Date().toISOString()
     };
     setBackgroundJobs(prev => [job, ...prev]);
 
-    setTimeout(() => {
-      setTemplates(prev => prev.map(t => ({ ...t, lastSyncedAt: new Date().toISOString() })));
-      setBackgroundJobs(prev => prev.map(j => j.id === job.id ? { ...j, status: 'COMPLETED', progress: 100, completedAt: new Date().toISOString() } : j));
-      addAudit('WHATSAPP', 'TEMPLATES_SYNCED', `Synchronized ${templates.length} templates with Meta Cloud API`);
-    }, 800);
+    try {
+      const activeWaba = wabaConfig.wabaId || currentCompany.wabaId;
+      const activeToken = wabaConfig.accessToken || currentCompany.accessToken;
+
+      const res = await fetchServerTemplates(undefined, activeWaba, activeToken);
+
+      if (res && res.error) {
+        setBackgroundJobs(prev => prev.map(j => j.id === job.id ? { ...j, status: 'FAILED', progress: 100, completedAt: new Date().toISOString() } : j));
+        addAudit('WHATSAPP', 'TEMPLATES_SYNC_FAILED', `Meta template sync notice: ${res.error}`);
+        return { success: false, count: 0, error: res.error };
+      }
+
+      if (res && res.templates && res.templates.length > 0) {
+        const converted: MetaTemplate[] = res.templates.map(st => {
+          const headerComp = st.components?.find(c => c.type === 'HEADER');
+          const bodyComp = st.components?.find(c => c.type === 'BODY');
+          const footerComp = st.components?.find(c => c.type === 'FOOTER');
+          const buttonsComp = st.components?.find(c => c.type === 'BUTTONS');
+
+          let headerType: 'NONE' | 'TEXT' | 'IMAGE' | 'DOCUMENT' = 'NONE';
+          if (headerComp) {
+            if (headerComp.format === 'IMAGE') headerType = 'IMAGE';
+            else if (headerComp.format === 'DOCUMENT') headerType = 'DOCUMENT';
+            else headerType = 'TEXT';
+          }
+
+          const bodyText = bodyComp?.text || '';
+          const varMatches = bodyText.match(/\{\{(\d+)\}\}/g);
+          const variablesCount = varMatches ? new Set(varMatches).size : 0;
+
+          const sampleValues: string[] = [];
+          if (bodyComp?.example?.body_text && Array.isArray(bodyComp.example.body_text[0])) {
+            sampleValues.push(...bodyComp.example.body_text[0]);
+          }
+
+          const buttons: MetaTemplate['buttons'] = [];
+          if (buttonsComp?.buttons) {
+            buttonsComp.buttons.forEach(b => {
+              let bType: 'QUICK_REPLY' | 'URL' | 'CALL' = 'QUICK_REPLY';
+              if (b.type === 'URL') bType = 'URL';
+              else if (b.type === 'PHONE_NUMBER') bType = 'CALL';
+              buttons.push({
+                type: bType,
+                text: b.text,
+                value: b.url || b.phone_number
+              });
+            });
+          }
+
+          return {
+            id: st.id ? `meta_${st.id}` : `tpl_${st.name}`,
+            companyId: currentCompany.id,
+            metaTemplateId: st.id || '',
+            name: st.name,
+            whatsapp_template_name: st.name,
+            category: (st.category?.toUpperCase() || 'MARKETING') as any,
+            language: st.language || 'en_US',
+            status: (st.status?.toUpperCase() || 'APPROVED') as any,
+            rejectionReason: st.rejected_reason,
+            headerType,
+            headerText: headerComp?.text,
+            bodyText,
+            variablesCount,
+            sampleValues,
+            footerText: footerComp?.text,
+            buttons,
+            lastSyncedAt: new Date().toISOString()
+          };
+        });
+
+        // Merge with existing: replace matching templates by name, and prepend newly fetched ones
+        setTemplates(prev => {
+          const map = new Map<string, MetaTemplate>();
+          // First keep default/existing
+          prev.forEach(p => map.set(p.name, p));
+          // Then overwrite / add Meta-synchronized templates
+          converted.forEach(c => map.set(c.name, c));
+          const merged = Array.from(map.values());
+          try {
+            localStorage.setItem('omniwaba_templates_cache', JSON.stringify(merged));
+          } catch {}
+          return merged;
+        });
+
+        // Persist to Supabase if connected
+        converted.forEach(tpl => {
+          syncRecordAsync('templates', {
+            id: tpl.id,
+            company_id: tpl.companyId,
+            meta_template_id: tpl.metaTemplateId,
+            name: tpl.name,
+            whatsapp_template_name: tpl.whatsapp_template_name,
+            category: tpl.category,
+            language: tpl.language,
+            status: tpl.status,
+            rejection_reason: tpl.rejectionReason,
+            header_type: tpl.headerType,
+            header_text: tpl.headerText,
+            body_text: tpl.bodyText,
+            variables_count: tpl.variablesCount,
+            sample_values: tpl.sampleValues,
+            footer_text: tpl.footerText,
+            buttons: tpl.buttons,
+            last_synced_at: tpl.lastSyncedAt
+          });
+        });
+
+        setBackgroundJobs(prev => prev.map(j => j.id === job.id ? { ...j, status: 'COMPLETED', progress: 100, completedAt: new Date().toISOString() } : j));
+        addAudit('WHATSAPP', 'TEMPLATES_SYNCED', `Successfully synchronized ${converted.length} templates from Meta Cloud API`);
+        return { success: true, count: converted.length, templates: converted };
+      } else {
+        // 0 templates returned from Meta Graph API
+        setTemplates(prev => {
+          const updated = prev.map(t => ({ ...t, lastSyncedAt: new Date().toISOString() }));
+          try {
+            localStorage.setItem('omniwaba_templates_cache', JSON.stringify(updated));
+          } catch {}
+          return updated;
+        });
+        setBackgroundJobs(prev => prev.map(j => j.id === job.id ? { ...j, status: 'COMPLETED', progress: 100, completedAt: new Date().toISOString() } : j));
+        addAudit('WHATSAPP', 'TEMPLATES_SYNCED', `Meta Cloud API checked — 0 remote message templates configured`);
+        return { success: true, count: 0, templates: [] };
+      }
+    } catch (err: any) {
+      console.warn('Error syncing templates from Meta:', err);
+      setBackgroundJobs(prev => prev.map(j => j.id === job.id ? { ...j, status: 'FAILED', progress: 100, completedAt: new Date().toISOString() } : j));
+      return { success: false, count: 0, error: err?.message || 'Failed to sync templates from Meta Cloud API.' };
+    }
   };
 
   const simulateIncomingWebhook = (
@@ -1996,7 +2163,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     const deduction = sendTestOutboundMessage(conv.contactPhone, content, category);
     if (!deduction.success) {
-      alert(`Message dispatch failed: ${deduction.error}`);
+      console.warn(`Message dispatch failed: ${deduction.error}`);
+      addAudit('WHATSAPP', 'MESSAGE_DISPATCH_FAILED', `Failed to send to ${conv.contactPhone}: ${deduction.error}`);
       return;
     }
 
@@ -2016,16 +2184,28 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       timestamp: new Date().toISOString()
     };
 
-    setMessages(prev => ({
-      ...prev,
-      [conversationId]: [...(prev[conversationId] || []), newMsg]
-    }));
+    setMessages(prev => {
+      const next = {
+        ...prev,
+        [conversationId]: [...(prev[conversationId] || []), newMsg]
+      };
+      try {
+        localStorage.setItem('omniwaba_messages_cache', JSON.stringify(next));
+      } catch {}
+      return next;
+    });
 
-    setConversations(prev => prev.map(c => c.id === conversationId ? {
-      ...c,
-      lastMessage: content,
-      lastMessageTime: 'just now'
-    } : c));
+    setConversations(prev => {
+      const updated = prev.map(c => c.id === conversationId ? {
+        ...c,
+        lastMessage: content,
+        lastMessageTime: 'just now'
+      } : c);
+      try {
+        localStorage.setItem('omniwaba_conversations_cache', JSON.stringify(updated));
+      } catch {}
+      return updated;
+    });
 
     // Live sync to Supabase
     syncRecordAsync('messages', {
@@ -2074,6 +2254,262 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }));
     }, 2800);
   };
+
+  const processedMessageIdsRef = useRef<Set<string>>(new Set());
+  const lastWebhookPollTimestampRef = useRef<string>(new Date(Date.now() - 3600000).toISOString());
+
+  const checkAndTriggerBotRules = useCallback((convId: string, phone: string, text: string) => {
+    const activeRules = botRules.filter(r => r.isActive);
+    const lowerText = text.toLowerCase().trim();
+
+    for (const rule of activeRules) {
+      let isMatch = false;
+      const kwList = rule.keywords && rule.keywords.length > 0
+        ? rule.keywords
+        : (rule.trigger_text ? rule.trigger_text.split(',').map(s => s.trim()) : []);
+
+      if (rule.triggerType === 'EXACT') {
+        isMatch = kwList.some(kw => lowerText === kw.toLowerCase().trim());
+      } else if (rule.triggerType === 'STARTS_WITH') {
+        isMatch = kwList.some(kw => lowerText.startsWith(kw.toLowerCase().trim()));
+      } else {
+        isMatch = kwList.some(kw => lowerText.includes(kw.toLowerCase().trim()));
+      }
+
+      if (isMatch) {
+        const reply = rule.replyText || rule.response_text || 'Thank you for reaching out! An agent will respond shortly.';
+        const botMsg: ChatMessage = {
+          id: `bot_${Date.now()}`,
+          conversationId: convId,
+          companyId: currentCompany.id,
+          direction: 'outgoing',
+          senderType: 'BOT',
+          senderName: `${rule.name} (Bot)`,
+          senderId: rule.id,
+          content: reply,
+          deliveryStatus: 'delivered',
+          wabaMessageId: `wamid.BOT${Math.random().toString(36).substring(2, 8).toUpperCase()}`,
+          whatsapp_message_id: `wamid.BOT${Math.random().toString(36).substring(2, 8).toUpperCase()}`,
+          timestamp: new Date().toISOString(),
+          isInternalNote: false
+        };
+
+        setTimeout(() => {
+          setMessages(prev => {
+            const list = prev[convId] || [];
+            const next = { ...prev, [convId]: [...list, botMsg] };
+            try {
+              localStorage.setItem('omniwaba_messages_cache', JSON.stringify(next));
+            } catch {}
+            return next;
+          });
+          setConversations(prev => {
+            const updated = prev.map(c => c.id === convId ? { ...c, lastMessage: reply, lastMessageTime: 'just now', isBotHandled: true } : c);
+            try {
+              localStorage.setItem('omniwaba_conversations_cache', JSON.stringify(updated));
+            } catch {}
+            return updated;
+          });
+          setBotRules(prev => prev.map(r => r.id === rule.id ? { ...r, hitCount: (r.hitCount || 0) + 1 } : r));
+
+          sendServerWhatsAppMessage(
+            {
+              to: phone.replace(/[^0-9]/g, ''),
+              type: 'text',
+              text: reply
+            },
+            wabaConfig.phoneNumberId,
+            wabaConfig.accessToken
+          ).catch(() => {});
+        }, 700);
+
+        break;
+      }
+    }
+  }, [botRules, currentCompany.id, wabaConfig]);
+
+  const ingestInboundMessage = useCallback((msg: {
+    id?: string;
+    wamid?: string;
+    from: string;
+    contactName?: string;
+    text: string;
+    type?: string;
+    timestamp?: string;
+  }) => {
+    const rawId = msg.wamid || msg.id || `inb_${Date.now()}`;
+    if (processedMessageIdsRef.current.has(rawId)) return;
+    processedMessageIdsRef.current.add(rawId);
+
+    const fromPhone = msg.from.startsWith('+') ? msg.from : `+${msg.from}`;
+    const cleanPhoneDigits = fromPhone.replace(/[^0-9]/g, '');
+    const contactName = msg.contactName || 'WhatsApp Contact';
+    const text = msg.text || '';
+    const nowIso = msg.timestamp || new Date().toISOString();
+    const timeStr = new Date(nowIso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+    // 1. Ensure contact exists
+    setContacts(prev => {
+      const exists = prev.some(c => c.phone.replace(/[^0-9]/g, '') === cleanPhoneDigits);
+      if (!exists) {
+        const newContact: Contact = {
+          id: `cnt_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+          companyId: currentCompany.id,
+          phone: fromPhone,
+          name: contactName,
+          consentStatus: 'OPTED_IN',
+          consentSource: 'INBOUND_MESSAGE',
+          consentTimestamp: nowIso,
+          tags: ['inbound_whatsapp'],
+          groups: ['grp_general'],
+          customAttributes: {},
+          createdAt: nowIso,
+          updatedAt: nowIso
+        };
+        syncRecordAsync('contacts', newContact);
+        return [newContact, ...prev];
+      }
+      return prev;
+    });
+
+    // 2. Find or create conversation
+    let conversationId = '';
+    setConversations(prev => {
+      const existingIdx = prev.findIndex(c => c.contactPhone.replace(/[^0-9]/g, '') === cleanPhoneDigits);
+      let updatedList: ChatConversation[];
+
+      if (existingIdx >= 0) {
+        const existing = prev[existingIdx];
+        conversationId = existing.id;
+        const updated = {
+          ...existing,
+          lastMessage: text,
+          lastMessageTime: timeStr,
+          unreadCount: (existing.unreadCount || 0) + 1,
+          status: 'open' as const,
+        };
+        const rest = prev.filter((_, i) => i !== existingIdx);
+        updatedList = [updated, ...rest];
+        syncRecordAsync('conversations', updated);
+      } else {
+        const newConvId = `conv_${cleanPhoneDigits}`;
+        conversationId = newConvId;
+        const newConv: ChatConversation = {
+          id: newConvId,
+          companyId: currentCompany.id,
+          contactId: `cnt_${cleanPhoneDigits}`,
+          contactPhone: fromPhone,
+          contactName: contactName,
+          assignedAgentId: 'usr_agent_rahul',
+          assignedAgentName: 'Rahul Sharma',
+          status: 'open',
+          isBotHandled: false,
+          unreadCount: 1,
+          lastMessage: text,
+          lastMessageTime: timeStr,
+          tags: ['whatsapp_cloud'],
+          createdAt: nowIso
+        };
+        updatedList = [newConv, ...prev];
+        syncRecordAsync('conversations', newConv);
+      }
+
+      try {
+        localStorage.setItem('omniwaba_conversations_cache', JSON.stringify(updatedList));
+      } catch {}
+      return updatedList;
+    });
+
+    // 3. Append chat message
+    const targetConvId = conversationId || `conv_${cleanPhoneDigits}`;
+    const newChatMessage: ChatMessage = {
+      id: rawId,
+      conversationId: targetConvId,
+      companyId: currentCompany.id,
+      direction: 'incoming',
+      senderType: 'CUSTOMER',
+      senderName: contactName,
+      senderId: fromPhone,
+      content: text,
+      deliveryStatus: 'delivered',
+      wabaMessageId: rawId,
+      whatsapp_message_id: rawId,
+      timestamp: nowIso,
+      isInternalNote: false
+    };
+
+    setMessages(prev => {
+      const existing = prev[targetConvId] || [];
+      if (existing.some(m => m.id === rawId || m.wabaMessageId === rawId)) {
+        return prev;
+      }
+      const next = { ...prev, [targetConvId]: [...existing, newChatMessage] };
+      try {
+        localStorage.setItem('omniwaba_messages_cache', JSON.stringify(next));
+      } catch {}
+      return next;
+    });
+
+    syncRecordAsync('messages', newChatMessage);
+    addAudit('WHATSAPP', 'INBOUND_MESSAGE_RECEIVED', `Inbound WhatsApp message from ${fromPhone} (${contactName}): "${text.substring(0, 50)}"`);
+
+    // 4. Trigger bot automation
+    checkAndTriggerBotRules(targetConvId, fromPhone, text);
+  }, [currentCompany.id, checkAndTriggerBotRules]);
+
+  const syncInboundWebhookMessages = async () => {
+    try {
+      const res = await fetchInboundWebhookEvents(lastWebhookPollTimestampRef.current);
+      if (res && res.success) {
+        if (Array.isArray(res.messages) && res.messages.length > 0) {
+          res.messages.forEach(msg => ingestInboundMessage(msg));
+        }
+        if (Array.isArray(res.events)) {
+          res.events.forEach(ev => {
+            if (ev.type === 'INBOUND_MESSAGE' && ev.details) {
+              ingestInboundMessage({
+                id: ev.wamid,
+                wamid: ev.wamid,
+                from: ev.from || '',
+                contactName: ev.details.contactName,
+                text: ev.details.text || '',
+                type: ev.details.type,
+                timestamp: ev.timestamp
+              });
+            } else if (ev.type === 'STATUS_UPDATE') {
+              simulateIncomingWebhook('STATUS_UPDATE', {
+                wabaMessageId: ev.wamid,
+                status: ev.status,
+                errorCode: ev.details?.errors?.[0]?.code
+              });
+            }
+          });
+        }
+        if (res.latestTimestamp) {
+          lastWebhookPollTimestampRef.current = res.latestTimestamp;
+        }
+      }
+    } catch (e) {
+      console.warn('Inbound webhook polling error:', e);
+    }
+  };
+
+  const simulateCustomerInboundMessage = async (phone: string, name: string, text: string) => {
+    const res = await simulateInboundWebhookMessage(phone, name, text);
+    if (res.success && res.inboundMessage) {
+      ingestInboundMessage(res.inboundMessage);
+    }
+    return { success: res.success, message: res.message };
+  };
+
+  // Background polling for incoming webhooks every 3.5 seconds
+  useEffect(() => {
+    syncInboundWebhookMessages();
+    const interval = setInterval(() => {
+      syncInboundWebhookMessages();
+    }, 3500);
+    return () => clearInterval(interval);
+  }, [ingestInboundMessage]);
 
   const addInternalNote = (conversationId: string, content: string) => {
     const note: InternalNote = {
@@ -2371,6 +2807,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         templates,
         updateWabaConfig,
         syncTemplatesFromMeta,
+        syncInboundWebhookMessages,
+        simulateCustomerInboundMessage,
         simulateIncomingWebhook,
         sendTestOutboundMessage,
         campaigns,

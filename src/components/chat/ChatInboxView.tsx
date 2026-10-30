@@ -12,7 +12,10 @@ import {
   AlertCircle, 
   Bot,
   User,
-  Clock
+  Clock,
+  RefreshCw,
+  X,
+  Radio
 } from 'lucide-react';
 
 export const ChatInboxView: React.FC = () => {
@@ -28,7 +31,9 @@ export const ChatInboxView: React.FC = () => {
     sendChatMessage,
     addInternalNote,
     reassignConversation,
-    users
+    users,
+    syncInboundWebhookMessages,
+    simulateCustomerInboundMessage
   } = useApp();
 
   const [activeTab, setActiveTab] = useState<'all' | 'mine' | 'new'>('all');
@@ -37,12 +42,53 @@ export const ChatInboxView: React.FC = () => {
   const [selectedTemplateId, setSelectedTemplateId] = useState('');
   const [activeMode, setActiveMode] = useState<'chat' | 'notes'>('chat');
   const [internalNoteText, setInternalNoteText] = useState('');
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [isSimModalOpen, setIsSimModalOpen] = useState(false);
+  const [simPhone, setSimPhone] = useState('+919876543210');
+  const [simName, setSimName] = useState('Rahul Sharma');
+  const [simText, setSimText] = useState('Hi! I am inquiring about WhatsApp Cloud API features.');
+  const [isSimulating, setIsSimulating] = useState(false);
+  const [simStatus, setSimStatus] = useState<string | null>(null);
 
   const activeConv = conversations.find(c => c.id === activeConversationId) || conversations[0];
   const convMessages = activeConv ? (messages[activeConv.id] || []) : [];
   const convNotes = activeConv ? (internalNotes[activeConv.id] || []) : [];
   const contact = contacts.find(c => c.phone.includes(activeConv?.contactPhone.replace(/[\s+]/g, '') || ''));
   const agents = users.filter(u => u.role === 'agent');
+
+  const mineCount = conversations.filter(c => c.assignedAgentId === currentUser.id).length;
+  const newCount = conversations.filter(c => (c.unreadCount || 0) > 0).length;
+
+  const handleManualSync = async () => {
+    setIsSyncing(true);
+    try {
+      await syncInboundWebhookMessages();
+    } finally {
+      setTimeout(() => setIsSyncing(false), 500);
+    }
+  };
+
+  const handleSimulateInbound = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!simPhone.trim() || !simText.trim()) return;
+    setIsSimulating(true);
+    setSimStatus('Simulating incoming WhatsApp webhook message...');
+
+    try {
+      const res = await simulateCustomerInboundMessage(simPhone.trim(), simName.trim(), simText.trim());
+      setSimStatus(res.message);
+      if (res.success) {
+        setTimeout(() => {
+          setIsSimModalOpen(false);
+          setSimStatus(null);
+        }, 1200);
+      }
+    } catch (err: any) {
+      setSimStatus(`Error: ${err?.message || 'Simulation failed'}`);
+    } finally {
+      setIsSimulating(false);
+    }
+  };
 
   const filteredConversations = conversations.filter(conv => {
     if (activeTab === 'mine' && conv.assignedAgentId !== currentUser.id) return false;
@@ -76,10 +122,44 @@ export const ChatInboxView: React.FC = () => {
       {/* COLUMN 1: CONVERSATIONS LIST matching Page 2 Bottom of PDF */}
       <div className="w-80 border-r border-slate-200 bg-white flex flex-col shrink-0">
         <div className="p-4 border-b border-slate-100">
-          <h2 className="text-base font-bold text-slate-800 tracking-tight">Conversations</h2>
+          <div className="flex items-center justify-between mb-2">
+            <h2 className="text-base font-bold text-slate-800 tracking-tight">Conversations</h2>
+            <div className="flex items-center gap-1.5">
+              <button
+                onClick={handleManualSync}
+                title="Fetch latest incoming WhatsApp messages"
+                className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-slate-100 rounded-lg transition cursor-pointer"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin text-blue-600' : ''}`} />
+              </button>
+              <button
+                onClick={() => setIsSimModalOpen(true)}
+                className="px-2 py-1 rounded text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 transition cursor-pointer"
+              >
+                + Test Inbound
+              </button>
+            </div>
+          </div>
 
-          {/* 3 Tabs matching Page 2 Bottom: All (3), Mine (4), New (1) */}
-          <div className="flex items-center space-x-1.5 mt-3 text-xs font-semibold">
+          <div className="flex items-center gap-1.5 text-[10px] text-emerald-700 font-medium mb-3">
+            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+            <span>Meta Webhook Live Sync Active</span>
+          </div>
+
+          {/* Search Box */}
+          <div className="relative mb-3">
+            <input
+              type="text"
+              value={chatSearch}
+              onChange={(e) => setChatSearch(e.target.value)}
+              placeholder="Search by contact or phone..."
+              className="w-full pl-7 pr-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-700 placeholder-slate-400 focus:outline-none focus:border-blue-500"
+            />
+            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2 top-2.5" />
+          </div>
+
+          {/* 3 Tabs matching Page 2 Bottom: All, Mine, New */}
+          <div className="flex items-center space-x-1.5 text-xs font-semibold">
             <button
               onClick={() => setActiveTab('all')}
               className={`px-3 py-1.5 rounded-md transition ${
@@ -98,7 +178,7 @@ export const ChatInboxView: React.FC = () => {
                   : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
               }`}
             >
-              Mine (4)
+              Mine ({mineCount})
             </button>
             <button
               onClick={() => setActiveTab('new')}
@@ -108,7 +188,7 @@ export const ChatInboxView: React.FC = () => {
                   : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
               }`}
             >
-              New (1)
+              New ({newCount})
             </button>
           </div>
         </div>
@@ -138,9 +218,16 @@ export const ChatInboxView: React.FC = () => {
                     <span className="text-[10px] text-slate-400">{conv.lastMessageTime}</span>
                   </div>
 
-                  <p className="text-[11px] text-slate-500 truncate mt-0.5">
-                    {conv.lastMessage}
-                  </p>
+                  <div className="flex items-center justify-between mt-0.5">
+                    <p className="text-[11px] text-slate-500 truncate pr-2">
+                      {conv.lastMessage}
+                    </p>
+                    {Boolean(conv.unreadCount && conv.unreadCount > 0) && (
+                      <span className="px-1.5 py-0.2 rounded-full bg-blue-600 text-white text-[9px] font-bold shrink-0">
+                        {conv.unreadCount}
+                      </span>
+                    )}
+                  </div>
                 </div>
               </button>
             );
@@ -335,6 +422,96 @@ export const ChatInboxView: React.FC = () => {
           <div className="text-xs text-slate-400">No profile details found.</div>
         )}
       </div>
+      {/* Modal: Simulate Customer Inbound WhatsApp Message */}
+      {isSimModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-xs">
+          <div className="bg-white rounded-xl shadow-xl border border-slate-200 max-w-md w-full overflow-hidden">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 bg-slate-50">
+              <div className="flex items-center space-x-2">
+                <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                <h3 className="text-sm font-bold text-slate-800">Simulate Inbound WhatsApp Webhook</h3>
+              </div>
+              <button
+                onClick={() => setIsSimModalOpen(false)}
+                className="text-slate-400 hover:text-slate-600 p-1"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSimulateInbound} className="p-5 space-y-4 text-xs">
+              <p className="text-slate-500 text-[11px]">
+                Simulates an incoming WhatsApp message payload from a customer hitting your webhook endpoint. The message will be ingested directly into live chat.
+              </p>
+
+              {simStatus && (
+                <div className="p-2.5 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs">
+                  {simStatus}
+                </div>
+              )}
+
+              <div>
+                <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                  Customer Mobile Number (E.164)
+                </label>
+                <input
+                  type="text"
+                  value={simPhone}
+                  onChange={(e) => setSimPhone(e.target.value)}
+                  placeholder="+919876543210"
+                  className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg font-mono text-slate-800 focus:outline-none focus:border-blue-500"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                  Sender Contact Name
+                </label>
+                <input
+                  type="text"
+                  value={simName}
+                  onChange={(e) => setSimName(e.target.value)}
+                  placeholder="e.g. Rahul Sharma"
+                  className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-slate-800 focus:outline-none focus:border-blue-500"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                  Inbound Message Body
+                </label>
+                <textarea
+                  rows={3}
+                  value={simText}
+                  onChange={(e) => setSimText(e.target.value)}
+                  placeholder="Hello, I would like to know your pricing plans..."
+                  className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-slate-800 focus:outline-none focus:border-blue-500 font-sans"
+                  required
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setIsSimModalOpen(false)}
+                  className="px-3.5 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 font-semibold"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSimulating}
+                  className="px-4 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-semibold transition"
+                >
+                  {isSimulating ? 'Dispatching...' : 'Dispatch Inbound Webhook'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

@@ -171,10 +171,27 @@ export const ContactsView: React.FC<ContactsViewProps> = ({ initialSubTab = 'lis
                 Fields
               </button>
               <button
-                onClick={() => alert('Exporting all contacts to CSV...')}
-                className="px-3 py-1.5 rounded-md bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold shadow-xs transition"
+                onClick={() => {
+                  const headers = ['Name', 'Phone', 'Email', 'Consent Status', 'Tags'];
+                  const rows = filteredContacts.map(c => [
+                    `"${c.name.replace(/"/g, '""')}"`,
+                    `"${c.phone}"`,
+                    `"${c.email || ''}"`,
+                    `"${c.consentStatus}"`,
+                    `"${(c.tags || []).join(';')}"`
+                  ]);
+                  const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+                  const encodedUri = encodeURI(csvContent);
+                  const link = document.createElement('a');
+                  link.setAttribute('href', encodedUri);
+                  link.setAttribute('download', `contacts_export_${new Date().toISOString().slice(0, 10)}.csv`);
+                  document.body.appendChild(link);
+                  link.click();
+                  document.body.removeChild(link);
+                }}
+                className="px-3 py-1.5 rounded-md bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold shadow-xs transition cursor-pointer"
               >
-                Export
+                Export CSV
               </button>
             </div>
           </div>

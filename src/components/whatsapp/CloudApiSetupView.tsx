@@ -408,8 +408,14 @@ export const CloudApiSetupView: React.FC = () => {
     setIsSyncingTemplates(true);
     setSyncStatus(null);
     try {
-      await syncTemplatesFromMeta();
-      setSyncStatus('Message templates synchronized with Meta Cloud API.');
+      const res = await syncTemplatesFromMeta();
+      if (res && res.count > 0) {
+        setSyncStatus(`Successfully synchronized ${res.count} message template(s) from Meta Cloud API.`);
+      } else if (res && res.error) {
+        setSyncStatus(`Meta notice: ${res.error}`);
+      } else {
+        setSyncStatus('Message templates synchronized with Meta Cloud API.');
+      }
     } catch (err: any) {
       setSyncStatus(`Sync notice: ${err?.message || 'Templates synchronized.'}`);
     } finally {
