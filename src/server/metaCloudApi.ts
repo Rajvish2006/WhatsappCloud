@@ -134,6 +134,14 @@ export function getMetaConfig(overrides?: Partial<MetaConfig>): MetaConfig {
   };
 }
 
+function getMetaObjectUrl(config: MetaConfig, objectId: string, path = ''): string {
+  if (!/^\d+$/.test(objectId)) {
+    throw new Error('Invalid Meta object ID.');
+  }
+
+  return `${config.baseUrl}/${objectId}${path}`;
+}
+
 /**
  * Map Meta Graph API error codes to human-readable explanations and guidance
  */
@@ -237,7 +245,7 @@ export async function verifyMetaCredentials(
 
     // 1. If Phone Number ID is provided, query it via Graph API
     if (config.phoneNumberId) {
-      const phoneUrl = `${config.baseUrl}/${config.phoneNumberId}?fields=id,verified_name,display_phone_number,quality_rating,code_verification_status`;
+      const phoneUrl = getMetaObjectUrl(config, config.phoneNumberId, '?fields=id,verified_name,display_phone_number,quality_rating,code_verification_status');
       const phoneRes = await fetch(phoneUrl, {
         headers: { Authorization: `Bearer ${config.accessToken}` },
       });
@@ -262,7 +270,7 @@ export async function verifyMetaCredentials(
 
     // 2. If WABA ID is provided, query it via Graph API
     if (config.wabaId) {
-      const wabaUrl = `${config.baseUrl}/${config.wabaId}?fields=id,name,timezone_id,currency`;
+      const wabaUrl = getMetaObjectUrl(config, config.wabaId, '?fields=id,name,timezone_id,currency');
       const wabaRes = await fetch(wabaUrl, {
         headers: { Authorization: `Bearer ${config.accessToken}` },
       });
@@ -323,7 +331,7 @@ export async function registerPhoneNumberWithPin(
   }
 
   try {
-    const url = `${config.baseUrl}/${config.phoneNumberId}/register`;
+    const url = getMetaObjectUrl(config, config.phoneNumberId, '/register');
     const response = await fetch(url, {
       method: 'POST',
       headers: {
@@ -374,7 +382,7 @@ export async function updateVerifiedDisplayName(
   }
 
   try {
-    const url = `${config.baseUrl}/${config.phoneNumberId}`;
+    const url = getMetaObjectUrl(config, config.phoneNumberId);
     const payload: any = {
       messaging_product: 'whatsapp',
       verified_name: newDisplayName.trim(),
@@ -430,7 +438,7 @@ export async function fetchTemplatesFromMeta(
 
   try {
     const fields = 'id,name,status,category,language,components,rejected_reason';
-    let url = `${config.baseUrl}/${config.wabaId}/message_templates?fields=${fields}&limit=100`;
+    let url = getMetaObjectUrl(config, config.wabaId, `/message_templates?fields=${fields}&limit=100`);
     if (cursorAfter) {
       url += `&after=${encodeURIComponent(cursorAfter)}`;
     }
@@ -494,7 +502,7 @@ export async function createTemplateInMeta(
   }
 
   try {
-    const url = `${config.baseUrl}/${config.wabaId}/message_templates`;
+    const url = getMetaObjectUrl(config, config.wabaId, '/message_templates');
     const response = await fetch(url, {
       method: 'POST',
       headers: {
@@ -541,7 +549,7 @@ export async function fetchPhoneNumbersFromMeta(
   }
 
   try {
-    const url = `${config.baseUrl}/${config.wabaId}/phone_numbers?fields=id,verified_name,display_phone_number,quality_rating,code_verification_status,name_status`;
+    const url = getMetaObjectUrl(config, config.wabaId, '/phone_numbers?fields=id,verified_name,display_phone_number,quality_rating,code_verification_status,name_status');
     const response = await fetch(url, {
       method: 'GET',
       headers: {
@@ -588,7 +596,7 @@ export async function sendWhatsAppMessage(
   }
 
   try {
-    const url = `${config.baseUrl}/${config.phoneNumberId}/messages`;
+    const url = getMetaObjectUrl(config, config.phoneNumberId, '/messages');
     const response = await fetch(url, {
       method: 'POST',
       headers: {
