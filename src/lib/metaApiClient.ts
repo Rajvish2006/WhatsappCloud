@@ -636,3 +636,239 @@ export async function verifyWhatsAppMetaConnection(credentials?: {
     recommendation: 'Please enter your Meta permanent System User token.',
   };
 }
+
+/**
+ * Register WhatsApp Phone Number with 6-digit PIN
+ * Direct implementation of POST /{phone-number-id}/register
+ */
+export async function registerWhatsAppPhoneNumberWithPin(
+  pin: string,
+  credentials?: {
+    accessToken?: string;
+    phoneNumberId?: string;
+    graphApiVersion?: string;
+  }
+): Promise<{ success: boolean; message: string; data?: any }> {
+  const cleanPin = pin.replace(/\D/g, '').padStart(6, '0');
+  const token = credentials?.accessToken?.trim();
+  const phoneId = credentials?.phoneNumberId?.trim();
+  const version = credentials?.graphApiVersion?.trim() || 'v22.0';
+
+  // 1. Try Backend Server Proxy first
+  try {
+    const res = await fetch('/api/whatsapp/register-pin', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pin: cleanPin, ...credentials }),
+    });
+    const parsed = await safeParseResponse(res);
+    if (parsed.isJson && parsed.data?.success) {
+      return {
+        success: true,
+        message: 'Phone number registered successfully with 6-digit PIN via Meta Graph API.',
+        data: parsed.data,
+      };
+    }
+    if (parsed.isJson && parsed.data && !parsed.data.success) {
+      return {
+        success: false,
+        message: parsed.data.error || 'Registration failed.',
+        data: parsed.data,
+      };
+    }
+  } catch (err) {
+    console.warn('Backend register-pin proxy error, attempting direct Meta Graph API:', err);
+  }
+
+  // 2. Direct Meta Graph API Fallback (Guaranteed to talk to Meta)
+  if (token && phoneId && !token.includes('sample')) {
+    try {
+      const metaUrl = `https://graph.facebook.com/${version}/${phoneId}/register`;
+      const metaRes = await fetch(metaUrl, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          messaging_product: 'whatsapp',
+          pin: cleanPin,
+        }),
+      });
+      const parsed = await safeParseResponse(metaRes);
+      if (metaRes.ok && parsed.isJson && (parsed.data?.success || parsed.data?.id)) {
+        return {
+          success: true,
+          message: 'Phone number registered successfully with 6-digit 2FA PIN!',
+          data: parsed.data,
+        };
+      }
+      const errorMsg = parsed.data?.error?.message || `Meta registration returned HTTP ${metaRes.status}`;
+      return { success: false, message: errorMsg, data: parsed.data };
+    } catch (e: any) {
+      return { success: false, message: e.message || 'Direct Meta Graph API registration failed.' };
+    }
+  }
+
+  return {
+    success: false,
+    message: 'Access Token and Phone Number ID are required to register with Meta.',
+  };
+}
+
+/**
+ * Update or submit WhatsApp Verified Display Name
+ * Direct implementation of POST /{phone-number-id} with verified_name
+ */
+export async function updateWhatsAppDisplayName(
+  displayName: string,
+  pin?: string,
+  credentials?: {
+    accessToken?: string;
+    phoneNumberId?: string;
+    graphApiVersion?: string;
+  }
+): Promise<{ success: boolean; message: string; data?: any }> {
+  const token = credentials?.accessToken?.trim();
+  const phoneId = credentials?.phoneNumberId?.trim();
+  const version = credentials?.graphApiVersion?.trim() || 'v22.0';
+
+  // 1. Try Backend Server Proxy first
+  try {
+    const res = await fetch('/api/whatsapp/display-name', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ displayName, pin, ...credentials }),
+    });
+    const parsed = await safeParseResponse(res);
+    if (parsed.isJson && parsed.data?.success) {
+      return {
+        success: true,
+        message: parsed.data.message || `Display name '${displayName}' submitted to Meta successfully!`,
+        data: parsed.data,
+      };
+    }
+  } catch (err) {
+    console.warn('Backend display-name proxy error, checking direct Meta Graph API:', err);
+  }
+
+  // 2. Direct Meta Graph API Fallback
+  if (token && phoneId && !token.includes('sample')) {
+    try {
+      const metaUrl = `https://graph.facebook.com/${version}/${phoneId}`;
+      const payload: any = {
+        messaging_product: 'whatsapp',
+        verified_name: displayName.trim(),
+      };
+      if (pin) {
+        payload.pin = pin.replace(/\D/g, '').padStart(6, '0');
+      }
+
+      const metaRes = await fetch(metaUrl, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      });
+      const parsed = await safeParseResponse(metaRes);
+      if (metaRes.ok && parsed.isJson) {
+        return {
+          success: true,
+          message: `Display name '${displayName}' submitted to Meta successfully!`,
+          data: parsed.data,
+        };
+      }
+      const errorMsg = parsed.data?.error?.message || `Meta rejected display name update (HTTP ${metaRes.status})`;
+      return { success: false, message: errorMsg, data: parsed.data };
+    } catch (e: any) {
+      return { success: false, message: e.message || 'Direct Meta Graph API request failed.' };
+    }
+  }
+
+  return {
+    success: false,
+    message: 'Access Token and Phone Number ID are required to set Display Name.',
+  };
+}
+
+/**
+ * Test Webhook Handshake Endpoint (Simulates Meta & Google Apps Script verifyWebhook test)
+ * Performs GET {callbackUrl}?hub.mode=subscribe&hub.verify_token={verifyToken}&hub.challenge={challenge}
+ */
+export async function testWebhookHandshakeEndpoint(
+  callbackUrl: string,
+  verifyToken: string
+): Promise<{
+  success: boolean;
+  statusCode: number;
+  responseBody: string;
+  message: string;
+  challengeSent: string;
+}> {
+  const challenge = `test_challenge_${Math.floor(Math.random() * 899999 + 100000)}`;
+  const fullUrl = `${callbackUrl}${callbackUrl.includes('?') ? '&' : '?'}hub.mode=subscribe&hub.verify_token=${encodeURIComponent(verifyToken)}&hub.challenge=${encodeURIComponent(challenge)}`;
+
+  try {
+    const res = await fetch(fullUrl, {
+      method: 'GET',
+      headers: {
+        Accept: 'text/plain, application/json, */*',
+      },
+    });
+    const text = await res.text();
+    const cleanText = text.trim();
+
+    if (res.ok && cleanText === challenge) {
+      return {
+        success: true,
+        statusCode: res.status,
+        responseBody: cleanText,
+        challengeSent: challenge,
+        message: 'Verified (200 OK): Hub challenge matched perfectly! Meta Webhook handshake is operational.',
+      };
+    } else if (res.ok) {
+      return {
+        success: false,
+        statusCode: res.status,
+        responseBody: cleanText.substring(0, 200),
+        challengeSent: challenge,
+        message: `HTTP ${res.status} OK received, but challenge text did not match. Returned: "${cleanText.substring(0, 60)}..."`,
+      };
+    } else if (res.status === 404) {
+      return {
+        success: false,
+        statusCode: res.status,
+        responseBody: cleanText.substring(0, 200),
+        challengeSent: challenge,
+        message: `Failed (HTTP 404: Endpoint not found at ${callbackUrl}). Ensure Vercel serverless /api/webhook.ts is deployed.`,
+      };
+    } else if (res.status === 403) {
+      return {
+        success: false,
+        statusCode: res.status,
+        responseBody: cleanText.substring(0, 200),
+        challengeSent: challenge,
+        message: `Failed (HTTP 403 Forbidden: Verify token mismatch). Ensure verify token matches: "${verifyToken}"`,
+      };
+    } else {
+      return {
+        success: false,
+        statusCode: res.status,
+        responseBody: cleanText.substring(0, 200),
+        challengeSent: challenge,
+        message: `Failed (HTTP ${res.status}): ${cleanText.substring(0, 100)}`,
+      };
+    }
+  } catch (err: any) {
+    return {
+      success: false,
+      statusCode: 0,
+      responseBody: err?.message || 'Network error',
+      challengeSent: challenge,
+      message: `Execution Error: ${err?.message || 'Unable to reach webhook URL'}`,
+    };
+  }
+}
+

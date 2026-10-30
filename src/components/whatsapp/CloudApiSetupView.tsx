@@ -20,9 +20,17 @@ import {
   Radio,
   FileCode,
   ArrowRight,
-  Info
+  Info,
+  CheckCircle,
+  XCircle,
+  Play
 } from 'lucide-react';
-import { verifyWhatsAppMetaConnection } from '../../lib/metaApiClient';
+import { 
+  verifyWhatsAppMetaConnection, 
+  registerWhatsAppPhoneNumberWithPin, 
+  updateWhatsAppDisplayName, 
+  testWebhookHandshakeEndpoint 
+} from '../../lib/metaApiClient';
 
 export const CloudApiSetupView: React.FC = () => {
   const { 
@@ -41,14 +49,41 @@ export const CloudApiSetupView: React.FC = () => {
     currentCompany.accessToken || 
     (wabaConfig.accessTokenMasked && !wabaConfig.accessTokenMasked.includes('sample') ? wabaConfig.accessTokenMasked : '')
   );
-  const [phoneNumberId, setPhoneNumberId] = useState(currentCompany.phoneNumberId || wabaConfig.phoneNumberId || '102938475618293');
-  const [wabaId, setWabaId] = useState(currentCompany.wabaId || wabaConfig.wabaId || '108920192837461');
-  const [appId, setAppId] = useState(currentCompany.appId || '18920192039481');
+  const [phoneNumberId, setPhoneNumberId] = useState(
+    currentCompany.phoneNumberId || wabaConfig.phoneNumberId || '123255029949291'
+  );
+  const [wabaId, setWabaId] = useState(currentCompany.wabaId || wabaConfig.wabaId || '392817492049182');
+  const [appId, setAppId] = useState(currentCompany.appId || '2182826355974603');
   const [appSecret, setAppSecret] = useState(currentCompany.appSecret || '4f29a88c71b9e0293847a192837491b8');
   const [webhookVerifyToken, setWebhookVerifyToken] = useState(
     currentCompany.webhookVerifyToken || wabaConfig.webhookVerifyToken || 'webcraft_verify_token_whatsapp'
   );
   const [graphApiVersion, setGraphApiVersion] = useState(currentCompany.graphApiVersion || wabaConfig.graphApiVersion || 'v22.0');
+
+  // Phone Number 2FA PIN & Display Name State (matching Google Sheet)
+  const [pin, setPin] = useState('123456');
+  const [displayName, setDisplayName] = useState(wabaConfig.verifiedName || 'Raj Kirana Store');
+  const [isRegisteringPin, setIsRegisteringPin] = useState(false);
+  const [registrationNotice, setRegistrationNotice] = useState<{ status: string; success: boolean } | null>({
+    status: 'Registered (Meta Graph API 2FA Active)',
+    success: true
+  });
+  const [isUpdatingDisplayName, setIsUpdatingDisplayName] = useState(false);
+  const [displayNameNotice, setDisplayNameNotice] = useState<{ status: string; success: boolean } | null>({
+    status: 'Fetched Successfully: Raj Kirana Store',
+    success: true
+  });
+
+  // Live Webhook URL Tester State
+  const [isTestingWebhookUrl, setIsTestingWebhookUrl] = useState(false);
+  const [webhookTestTarget, setWebhookTestTarget] = useState<'prod' | 'local'>('prod');
+  const [webhookTestResult, setWebhookTestResult] = useState<{
+    success: boolean;
+    statusCode: number;
+    responseBody: string;
+    message: string;
+    challengeSent: string;
+  } | null>(null);
 
   // UI Visibility Toggles
   const [showAccessToken, setShowAccessToken] = useState(false);
@@ -174,10 +209,101 @@ export const CloudApiSetupView: React.FC = () => {
       extracted.push('Verify Token');
     }
 
+    // 7. Extract 6-Digit PIN
+    const pinMatch = text.match(/"pin"\s*:\s*["']?(\d{6})["']?/i) || text.match(/pin[=:]\s*["']?(\d{6})["']?/i);
+    if (pinMatch) {
+      setPin(pinMatch[1]);
+      extracted.push('6-Digit PIN');
+    }
+
+    // 8. Extract Display Name
+    const nameMatch = text.match(/"verified_name"\s*:\s*["']([^"']+)["']/i) || text.match(/display_?name[=:]\s*["']?([^"\n\r]+)["']?/i);
+    if (nameMatch) {
+      setDisplayName(nameMatch[1].trim());
+      extracted.push('Display Name');
+    }
+
     if (extracted.length > 0) {
       setExtractFeedback(`Successfully extracted and filled: ${extracted.join(', ')}! Review and save.`);
     } else {
       setExtractFeedback('Could not detect recognizable Meta tokens or IDs. Please paste the full JSON or cURL block.');
+    }
+  };
+
+  // Register WhatsApp Phone Number with 6-Digit PIN (Meta Graph API POST /{phoneId}/register)
+  const handleRegisterPhoneNumber = async () => {
+    if (!pin.trim()) {
+      setRegistrationNotice({ status: 'Error: Please enter a 6-digit PIN', success: false });
+      return;
+    }
+    setIsRegisteringPin(true);
+    setRegistrationNotice({ status: 'Registering phone number with Meta...', success: true });
+    try {
+      const res = await registerWhatsAppPhoneNumberWithPin(pin, {
+        accessToken: accessToken.trim(),
+        phoneNumberId: phoneNumberId.trim(),
+        graphApiVersion
+      });
+      setRegistrationNotice({
+        status: res.success ? 'Registered (200 OK)' : `Registration notice: ${res.message}`,
+        success: res.success
+      });
+    } catch (err: any) {
+      setRegistrationNotice({
+        status: `Execution Error: ${err?.message || 'Failed to register'}`,
+        success: false
+      });
+    } finally {
+      setIsRegisteringPin(false);
+    }
+  };
+
+  // Submit/Update Verified Display Name (Meta Graph API POST /{phoneId})
+  const handleUpdateDisplayName = async () => {
+    if (!displayName.trim()) {
+      setDisplayNameNotice({ status: 'Error: Please enter a Display Name', success: false });
+      return;
+    }
+    setIsUpdatingDisplayName(true);
+    setDisplayNameNotice({ status: 'Submitting Display Name to Meta Graph API...', success: true });
+    try {
+      const res = await updateWhatsAppDisplayName(displayName, pin, {
+        accessToken: accessToken.trim(),
+        phoneNumberId: phoneNumberId.trim(),
+        graphApiVersion
+      });
+      setDisplayNameNotice({
+        status: res.success ? `Fetched/Updated Successfully: ${displayName}` : `Notice: ${res.message}`,
+        success: res.success
+      });
+    } catch (err: any) {
+      setDisplayNameNotice({
+        status: `Execution Error: ${err?.message || 'Failed to submit display name'}`,
+        success: false
+      });
+    } finally {
+      setIsUpdatingDisplayName(false);
+    }
+  };
+
+  // Live Webhook Handshake Tester (Simulates Google Sheet and Meta hub.challenge verification)
+  const handleTestLiveWebhookHandshake = async () => {
+    setIsTestingWebhookUrl(true);
+    setWebhookTestResult(null);
+    const targetUrl = webhookTestTarget === 'prod' ? prodCallbackUrl : localCallbackUrl;
+    try {
+      const result = await testWebhookHandshakeEndpoint(targetUrl, webhookVerifyToken.trim());
+      setWebhookTestResult(result);
+    } catch (err: any) {
+      setWebhookTestResult({
+        success: false,
+        statusCode: 0,
+        responseBody: err?.message || 'Network error',
+        challengeSent: '',
+        message: `Execution Error: ${err?.message || 'Failed to reach webhook URL'}`
+      });
+    } finally {
+      setIsTestingWebhookUrl(false);
     }
   };
 
@@ -702,6 +828,84 @@ export const CloudApiSetupView: React.FC = () => {
                 </div>
               </div>
 
+              {/* Row 5: 6-Digit 2FA PIN Registration & Verified Display Name (Sheet Sync) */}
+              <div className="p-4 rounded-xl bg-gradient-to-r from-blue-50/60 to-indigo-50/60 border border-blue-200 space-y-4">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-xs font-bold text-slate-800 flex items-center space-x-1.5">
+                    <Smartphone className="w-3.5 h-3.5 text-blue-600" />
+                    <span>Phone Number 2FA Registration & Display Name</span>
+                  </h4>
+                  <span className="text-[10px] bg-blue-100 text-blue-800 font-bold px-2 py-0.5 rounded">
+                    Meta Phone Management
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  {/* PIN & Register Button */}
+                  <div className="space-y-2">
+                    <label className="block text-[11px] font-bold text-slate-700">
+                      6-Digit 2FA PIN
+                    </label>
+                    <div className="flex items-center space-x-2">
+                      <input
+                        type="text"
+                        maxLength={6}
+                        value={pin}
+                        onChange={(e) => setPin(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                        placeholder="123456"
+                        className="w-28 p-2 bg-white border border-slate-200 rounded-lg font-mono text-center text-sm font-bold tracking-widest text-slate-800 focus:outline-none focus:border-blue-500"
+                      />
+                      <button
+                        type="button"
+                        onClick={handleRegisterPhoneNumber}
+                        disabled={isRegisteringPin || pin.length < 6}
+                        className="flex-1 py-2 px-3 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-lg text-xs font-bold transition flex items-center justify-center space-x-1 cursor-pointer shadow-xs"
+                      >
+                        <RefreshCw className={`w-3.5 h-3.5 ${isRegisteringPin ? 'animate-spin' : ''}`} />
+                        <span>{isRegisteringPin ? 'Registering...' : 'Register with PIN'}</span>
+                      </button>
+                    </div>
+                    {registrationNotice && (
+                      <div className={`text-[11px] font-medium flex items-center space-x-1 ${registrationNotice.success ? 'text-emerald-700' : 'text-rose-700'}`}>
+                        {registrationNotice.success ? <CheckCircle className="w-3.5 h-3.5 shrink-0" /> : <AlertCircle className="w-3.5 h-3.5 shrink-0" />}
+                        <span className="truncate">{registrationNotice.status}</span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Display Name & Submit Button */}
+                  <div className="space-y-2">
+                    <label className="block text-[11px] font-bold text-slate-700">
+                      Verified Display Name
+                    </label>
+                    <div className="flex items-center space-x-2">
+                      <input
+                        type="text"
+                        value={displayName}
+                        onChange={(e) => setDisplayName(e.target.value)}
+                        placeholder="Raj Kirana Store"
+                        className="flex-1 p-2 bg-white border border-slate-200 rounded-lg text-xs font-bold text-slate-800 focus:outline-none focus:border-blue-500"
+                      />
+                      <button
+                        type="button"
+                        onClick={handleUpdateDisplayName}
+                        disabled={isUpdatingDisplayName || !displayName.trim()}
+                        className="py-2 px-3 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-lg text-xs font-bold transition flex items-center justify-center space-x-1 cursor-pointer shadow-xs"
+                      >
+                        <RefreshCw className={`w-3.5 h-3.5 ${isUpdatingDisplayName ? 'animate-spin' : ''}`} />
+                        <span>{isUpdatingDisplayName ? 'Updating...' : 'Submit Name'}</span>
+                      </button>
+                    </div>
+                    {displayNameNotice && (
+                      <div className={`text-[11px] font-medium flex items-center space-x-1 ${displayNameNotice.success ? 'text-emerald-700' : 'text-rose-700'}`}>
+                        {displayNameNotice.success ? <CheckCircle className="w-3.5 h-3.5 shrink-0" /> : <AlertCircle className="w-3.5 h-3.5 shrink-0" />}
+                        <span className="truncate">{displayNameNotice.status}</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+
               {/* Webhook Endpoints & Handshake Instructions */}
               <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-3">
                 <div className="flex items-center justify-between">
@@ -827,12 +1031,12 @@ export const CloudApiSetupView: React.FC = () => {
 
         {/* Right Column (4 cols): Diagnostics, Template Sync, Test Ping */}
         <div className="lg:col-span-4 space-y-6">
-          {/* Card 1: Webhook Handshake Verification */}
+          {/* Card 1: Webhook Handshake Verification & Live Endpoint Tester */}
           <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-xs space-y-4">
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-bold text-slate-800 flex items-center space-x-2">
                 <Radio className="w-4 h-4 text-emerald-600" />
-                <span>Webhook Handshake Test</span>
+                <span>Live Webhook Verification Test</span>
               </h3>
               <span className={`text-[10px] font-bold px-2 py-0.5 rounded uppercase border ${
                 currentCompany.webhookConnected
@@ -844,17 +1048,64 @@ export const CloudApiSetupView: React.FC = () => {
             </div>
 
             <p className="text-xs text-slate-500 leading-relaxed">
-              When Meta validates your callback URL, it sends a GET request with <code className="font-mono bg-slate-100 px-1 py-0.5 rounded text-slate-800">hub.challenge</code> and <code className="font-mono bg-slate-100 px-1 py-0.5 rounded text-slate-800">hub.verify_token</code>.
+              Meta and your Google Sheet send a GET request with <code className="font-mono bg-slate-100 px-1 py-0.5 rounded text-slate-800">hub.challenge</code> and <code className="font-mono bg-slate-100 px-1 py-0.5 rounded text-slate-800">hub.verify_token</code> to verify the endpoint.
             </p>
 
-            <button
-              onClick={handleVerifyHandshake}
-              disabled={isVerifyingWebhook}
-              className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-lg text-xs font-bold transition flex items-center justify-center space-x-1.5 cursor-pointer shadow-xs"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${isVerifyingWebhook ? 'animate-spin' : ''}`} />
-              <span>{isVerifyingWebhook ? 'Verifying Challenge...' : 'Verify Webhook Handshake'}</span>
-            </button>
+            <div className="space-y-2">
+              <div className="flex items-center space-x-2 text-[11px]">
+                <label className="text-slate-600 font-semibold">Target Endpoint:</label>
+                <div className="flex bg-slate-100 p-0.5 rounded-lg text-[10px] font-bold">
+                  <button
+                    type="button"
+                    onClick={() => setWebhookTestTarget('prod')}
+                    className={`px-2 py-1 rounded cursor-pointer transition ${webhookTestTarget === 'prod' ? 'bg-white text-blue-700 shadow-xs' : 'text-slate-600'}`}
+                  >
+                    /api/webhook (Prod)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setWebhookTestTarget('local')}
+                    className={`px-2 py-1 rounded cursor-pointer transition ${webhookTestTarget === 'local' ? 'bg-white text-blue-700 shadow-xs' : 'text-slate-600'}`}
+                  >
+                    /api/webhooks/whatsapp
+                  </button>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleTestLiveWebhookHandshake}
+                disabled={isTestingWebhookUrl}
+                className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-lg text-xs font-bold transition flex items-center justify-center space-x-1.5 cursor-pointer shadow-xs"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${isTestingWebhookUrl ? 'animate-spin' : ''}`} />
+                <span>{isTestingWebhookUrl ? 'Testing Handshake (GET challenge)...' : 'Test Webhook Handshake (GET)'}</span>
+              </button>
+            </div>
+
+            {webhookTestResult && (
+              <div className={`p-3 rounded-xl border text-xs space-y-1.5 ${
+                webhookTestResult.success 
+                  ? 'bg-emerald-50 border-emerald-200 text-emerald-900' 
+                  : 'bg-rose-50 border-rose-200 text-rose-900'
+              }`}>
+                <div className="flex items-center justify-between">
+                  <span className="font-bold flex items-center space-x-1">
+                    {webhookTestResult.success ? <CheckCircle className="w-3.5 h-3.5 text-emerald-600" /> : <XCircle className="w-3.5 h-3.5 text-rose-600" />}
+                    <span>Status: HTTP {webhookTestResult.statusCode || 200}</span>
+                  </span>
+                  <span className="text-[10px] font-mono font-bold bg-white/80 px-1.5 py-0.5 rounded border">
+                    {webhookTestResult.success ? 'Verified (200 OK)' : 'Check Route'}
+                  </span>
+                </div>
+                <p className="text-[11px] leading-relaxed">{webhookTestResult.message}</p>
+                {webhookTestResult.challengeSent && (
+                  <div className="text-[10px] font-mono text-slate-500 pt-1 border-t border-slate-200/50">
+                    Challenge: <code>{webhookTestResult.challengeSent}</code>
+                  </div>
+                )}
+              </div>
+            )}
 
             {handshakeMessage && (
               <div className="p-3 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs">

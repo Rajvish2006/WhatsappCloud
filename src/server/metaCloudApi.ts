@@ -300,6 +300,120 @@ export async function verifyMetaCredentials(
 }
 
 /**
+ * Register Phone Number with 6-digit PIN on WhatsApp Cloud API
+ * Endpoint: POST /{PHONE_NUMBER_ID}/register
+ */
+export async function registerPhoneNumberWithPin(
+  config: MetaConfig,
+  pin: string
+): Promise<{ success: boolean; data?: any; error?: string }> {
+  if (!config.accessToken || !config.phoneNumberId) {
+    return {
+      success: false,
+      error: 'Missing Meta Phone Number ID or Access Token in server environment.',
+    };
+  }
+
+  const cleanPin = String(pin).replace(/\D/g, '').padStart(6, '0');
+  if (cleanPin.length !== 6) {
+    return {
+      success: false,
+      error: 'PIN must be a 6-digit numeric string.',
+    };
+  }
+
+  try {
+    const url = `${config.baseUrl}/${config.phoneNumberId}/register`;
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${config.accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        messaging_product: 'whatsapp',
+        pin: cleanPin,
+      }),
+    });
+
+    const body = await response.json();
+    if (!response.ok) {
+      const mapped = mapMetaError(body.error || { code: response.status, message: response.statusText, type: 'OAuthException' });
+      return {
+        success: false,
+        error: `${mapped.message} (${mapped.recommendation})`,
+      };
+    }
+
+    return {
+      success: true,
+      data: body,
+    };
+  } catch (err: any) {
+    return {
+      success: false,
+      error: err?.message || 'Network failure registering phone number with Meta Cloud API.',
+    };
+  }
+}
+
+/**
+ * Set or Request Verified Display Name on WhatsApp Cloud API
+ * Endpoint: POST /{PHONE_NUMBER_ID}
+ */
+export async function updateVerifiedDisplayName(
+  config: MetaConfig,
+  newDisplayName: string,
+  pin?: string
+): Promise<{ success: boolean; data?: any; error?: string }> {
+  if (!config.accessToken || !config.phoneNumberId) {
+    return {
+      success: false,
+      error: 'Missing Meta Phone Number ID or Access Token in server environment.',
+    };
+  }
+
+  try {
+    const url = `${config.baseUrl}/${config.phoneNumberId}`;
+    const payload: any = {
+      messaging_product: 'whatsapp',
+      verified_name: newDisplayName.trim(),
+    };
+    if (pin) {
+      payload.pin = String(pin).replace(/\D/g, '').padStart(6, '0');
+    }
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${config.accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    const body = await response.json();
+    if (!response.ok) {
+      const mapped = mapMetaError(body.error || { code: response.status, message: response.statusText, type: 'OAuthException' });
+      return {
+        success: false,
+        error: `${mapped.message} (${mapped.recommendation})`,
+      };
+    }
+
+    return {
+      success: true,
+      data: body,
+    };
+  } catch (err: any) {
+    return {
+      success: false,
+      error: err?.message || 'Network failure updating display name with Meta Cloud API.',
+    };
+  }
+}
+
+/**
  * Fetch actual message templates from Meta Graph API
  * Endpoint: GET /{WABA_ID}/message_templates
  */

@@ -333,11 +333,15 @@ GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO anon, authenticated;
 GRANT ALL ON ALL ROUTINES IN SCHEMA public TO anon, authenticated;
 `;
 
+import { getSupabaseConfig as getBaseConfig, updateSupabaseClient } from './supabase';
+
 export const getSupabaseConfig = () => {
-  const url = import.meta.env.VITE_SUPABASE_URL || '';
-  const key = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || '';
-  const isConfigured = Boolean(url && key && !url.includes('mock-instance'));
-  return { url, key, isConfigured };
+  return getBaseConfig();
+};
+
+export const updateSupabaseCredentials = (url: string, key: string) => {
+  updateSupabaseClient(url, key);
+  return getBaseConfig();
 };
 
 export async function checkSupabaseConnection(): Promise<SupabaseStatus> {

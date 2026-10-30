@@ -31,10 +31,15 @@ import {
   pushAllDataToSupabase,
   syncRecordAsync,
   SUPABASE_RLS_FIX_SQL, 
-  SupabaseStatus 
+  SupabaseStatus,
+  updateSupabaseCredentials
 } from '../lib/supabaseService';
 import { generateHardenedSecretToken } from '../lib/tokenUtils';
-import { saveWhatsAppServerConfig, verifyWhatsAppMetaConnection } from '../lib/metaApiClient';
+import { 
+  saveWhatsAppServerConfig, 
+  verifyWhatsAppMetaConnection, 
+  fetchServerTemplates 
+} from '../lib/metaApiClient';
 import {
   INITIAL_COMPANIES,
   INITIAL_USERS,
