@@ -73,11 +73,8 @@ export interface Company {
   qualityRating?: string;
   createdAt: string;
   suspensionReason?: string;
-  appSecret?: string;
-  appId?: string;
   webhookConnected?: boolean;
   webhookConnectedAt?: string;
-  hardSecretToken?: string;
 }
 
 export interface User {
@@ -130,9 +127,6 @@ export interface WABAConfig {
   metaTier: 'TIER_1K' | 'TIER_10K' | 'TIER_100K' | 'TIER_UNLIMITED';
   accessTokenMasked: string;
   webhookVerifyToken: string;
-  appSecretMasked: string;
-  appSecret?: string;
-  appId?: string;
   accessToken?: string;
   graphApiVersion?: string;
   isConnected: boolean;

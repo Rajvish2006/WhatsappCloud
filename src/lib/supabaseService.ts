@@ -56,8 +56,6 @@ CREATE TABLE IF NOT EXISTS public.companies (
     waba_id TEXT,
     phone_number_id TEXT,
     access_token TEXT,
-    app_id TEXT,
-    app_secret TEXT,
     webhook_verify_token TEXT,
     graph_api_version TEXT DEFAULT 'v22.0',
     display_phone_number TEXT,
@@ -65,10 +63,14 @@ CREATE TABLE IF NOT EXISTS public.companies (
     quality_rating TEXT,
     webhook_connected BOOLEAN DEFAULT FALSE,
     webhook_connected_at TIMESTAMPTZ,
-    hard_secret_token TEXT,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- Migration: Ensure any vulnerable legacy columns are dropped
+ALTER TABLE IF EXISTS public.companies DROP COLUMN IF EXISTS app_secret;
+ALTER TABLE IF EXISTS public.companies DROP COLUMN IF EXISTS hard_secret_token;
+ALTER TABLE IF EXISTS public.companies DROP COLUMN IF EXISTS app_id;
 
 -- 2. Users Table
 CREATE TABLE IF NOT EXISTS public.users (
@@ -560,8 +562,6 @@ export async function pushAllDataToSupabase(payload: {
       waba_id: c.wabaId || c.wabaAccountId,
       phone_number_id: c.phoneNumberId,
       access_token: c.accessToken,
-      app_id: c.appId,
-      app_secret: c.appSecret,
       webhook_verify_token: c.webhookVerifyToken,
       graph_api_version: c.graphApiVersion || 'v22.0',
       display_phone_number: c.displayPhoneNumber,
@@ -569,7 +569,6 @@ export async function pushAllDataToSupabase(payload: {
       quality_rating: c.qualityRating,
       webhook_connected: c.webhookConnected ?? false,
       webhook_connected_at: c.webhookConnectedAt,
-      hard_secret_token: c.hardSecretToken,
       created_at: c.createdAt
     }));
     const { error } = await supabase.from('companies').upsert(companyRecords, { onConflict: 'id' });

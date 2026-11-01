@@ -140,13 +140,11 @@ interface AppContextType {
   sendTestOutboundMessage: (toPhone: string, text: string, category?: CreditCategory) => { success: boolean; error?: string; wamid?: string };
   verifyWebhookConnection: (companyId?: string) => Promise<{ success: boolean; message: string }>;
   resetWebhookVerification: (companyId?: string) => void;
-  updateCompanyAppCredentials: (appId: string, appSecret: string, companyId?: string) => void;
+  updateCompanyAppCredentials: (companyId?: string) => void;
   saveCentralizedMetaCredentials: (credentials: {
     accessToken: string;
     phoneNumberId: string;
     wabaId: string;
-    appId?: string;
-    appSecret?: string;
     webhookVerifyToken?: string;
     graphApiVersion?: string;
   }) => Promise<{
@@ -360,11 +358,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               timezone: c.timezone || 'Asia/Kolkata',
               currency: c.currency || 'INR',
               cached_credit_balance: Number(c.cached_credit_balance || 0),
-              appId: c.app_id,
-              appSecret: c.app_secret,
               webhookConnected: c.webhook_connected ?? true,
               webhookConnectedAt: c.webhook_connected_at,
-              hardSecretToken: c.hard_secret_token,
               createdAt: c.created_at || new Date().toISOString()
             }));
             const existingIds = new Set(fetched.map((f: any) => f.id));
@@ -708,10 +703,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       currency: 'INR',
       cached_credit_balance: initialMarketingQuota + initialUtilityQuota,
       wabaAccountId: data.wabaMode === 'SANDBOX' ? `waba_sandbox_${Date.now()}` : undefined,
-      appId: '18920192039481',
-      appSecret: '',
       webhookConnected: false, // Connection pending until verified!
-      hardSecretToken,
       createdAt: new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' })
     };
 
@@ -1265,19 +1257,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const cleanToken = credentials.accessToken.trim();
     const cleanPhoneId = credentials.phoneNumberId.trim();
     const cleanWabaId = credentials.wabaId.trim();
-    const cleanAppId = (credentials.appId || '').trim();
-    const cleanAppSecret = (credentials.appSecret || '').trim();
     const cleanVerifyToken = (credentials.webhookVerifyToken || 'webcraft_verify_token_whatsapp').trim();
     const cleanVersion = credentials.graphApiVersion || 'v22.0';
 
-    // 1. Update backend server runtime immediately
+    // 1. Update backend server runtime immediately (infrastructure secrets META_APP_ID/META_APP_SECRET remain strictly server-managed)
     try {
       await saveWhatsAppServerConfig({
         accessToken: cleanToken,
         phoneNumberId: cleanPhoneId,
         wabaId: cleanWabaId,
-        appId: cleanAppId,
-        appSecret: cleanAppSecret,
         webhookVerifyToken: cleanVerifyToken,
         graphApiVersion: cleanVersion
       });
@@ -1318,9 +1306,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       wabaId: cleanWabaId,
       phoneNumberId: cleanPhoneId,
       accessTokenMasked: cleanToken.length > 8 ? `${cleanToken.substring(0, 7)}...${cleanToken.substring(cleanToken.length - 4)}` : cleanToken,
-      appId: cleanAppId,
-      appSecret: cleanAppSecret,
-      appSecretMasked: cleanAppSecret.length > 8 ? `${cleanAppSecret.substring(0, 4)}...${cleanAppSecret.substring(cleanAppSecret.length - 4)}` : '••••••••',
       webhookVerifyToken: cleanVerifyToken,
       graphApiVersion: cleanVersion,
       isConnected,
@@ -1335,9 +1320,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       wabaId: cleanWabaId,
       wabaAccountId: cleanWabaId,
       phoneNumberId: cleanPhoneId,
-      accessToken: cleanToken,
-      appId: cleanAppId,
-      appSecret: cleanAppSecret,
       webhookVerifyToken: cleanVerifyToken,
       graphApiVersion: cleanVersion,
       displayPhoneNumber: displayPhone,
@@ -1346,27 +1328,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       webhookConnected: isConnected || c.webhookConnected
     } : c));
 
-    // 4. Save to Supabase (companies & app_settings)
+    // 4. Save to Supabase companies table (Only non-sensitive tenant parameters - zero app secrets)
     syncRecordAsync('companies', {
       id: currentCompany.id,
       waba_id: cleanWabaId,
       phone_number_id: cleanPhoneId,
-      access_token: cleanToken,
-      app_id: cleanAppId,
-      app_secret: cleanAppSecret,
       webhook_verify_token: cleanVerifyToken,
       graph_api_version: cleanVersion,
       display_phone_number: displayPhone,
       verified_name: verifiedName,
       quality_rating: qualityRating,
       webhook_connected: isConnected || currentCompany.webhookConnected,
-      updated_at: new Date().toISOString()
-    });
-
-    syncRecordAsync('app_settings', {
-      id: 'app_settings_global',
-      meta_app_id: cleanAppId,
-      meta_app_secret: cleanAppSecret,
       updated_at: new Date().toISOString()
     });
 
@@ -1774,28 +1746,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     );
   };
 
-  const updateCompanyAppCredentials = (appId: string, appSecret: string, companyId = currentCompany.id) => {
-    setCompanies(prev => prev.map(c => c.id === companyId ? {
-      ...c,
-      appId: appId.trim(),
-      appSecret: appSecret.trim()
-    } : c));
-
-    if (companyId === currentCompany.id) {
-      setWabaConfig(prev => ({
-        ...prev,
-        appId: appId.trim(),
-        appSecret: appSecret.trim(),
-        appSecretMasked: appSecret.trim() ? `${appSecret.trim().substring(0, 4)}...${appSecret.trim().substring(appSecret.trim().length - 4)}` : '••••••••'
-      }));
-      setAppSettings(prev => ({
-        ...prev,
-        metaAppId: appId.trim(),
-        metaAppSecret: appSecret.trim()
-      }));
-    }
-
-    addAudit('WHATSAPP', 'APP_SECRET_UPDATED', `Updated Meta App ID (${appId}) and App Secret credentials for company`, companyId);
+  const updateCompanyAppCredentials = (companyId = currentCompany.id) => {
+    // App credentials are governed globally on the server via META_APP_ID and META_APP_SECRET
+    addAudit('WHATSAPP', 'APP_CONFIG_NOTED', `Meta global architecture active (Configured via server environment variables)`, companyId);
   };
 
   const generateCompanyHardenedSecret = (name: string, scopes: string[], companyId = currentCompany.id): TenantApiKey => {
@@ -2650,10 +2603,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       timezone: companyData.timezone || 'Asia/Kolkata',
       currency: companyData.currency || 'INR',
       cached_credit_balance: marketingBonus + utilityBonus,
-      appId: '18920192039481',
-      appSecret: '',
       webhookConnected: false,
-      hardSecretToken,
       createdAt: new Date().toLocaleString()
     };
 

@@ -53,8 +53,6 @@ export const CloudApiSetupView: React.FC = () => {
     currentCompany.phoneNumberId || wabaConfig.phoneNumberId || '123255029949291'
   );
   const [wabaId, setWabaId] = useState(currentCompany.wabaId || wabaConfig.wabaId || '392817492049182');
-  const [appId, setAppId] = useState(currentCompany.appId || '2182826355974603');
-  const [appSecret, setAppSecret] = useState(currentCompany.appSecret || '4f29a88c71b9e0293847a192837491b8');
   const [webhookVerifyToken, setWebhookVerifyToken] = useState(
     currentCompany.webhookVerifyToken || wabaConfig.webhookVerifyToken || 'webcraft_verify_token_whatsapp'
   );
@@ -87,7 +85,6 @@ export const CloudApiSetupView: React.FC = () => {
 
   // UI Visibility Toggles
   const [showAccessToken, setShowAccessToken] = useState(false);
-  const [showAppSecret, setShowAppSecret] = useState(false);
   const [copiedCallback, setCopiedCallback] = useState(false);
   const [copiedVerify, setCopiedVerify] = useState(false);
 
@@ -182,25 +179,7 @@ export const CloudApiSetupView: React.FC = () => {
       extracted.push('WABA ID');
     }
 
-    // 4. Extract App ID
-    const appIdMatch = 
-      text.match(/"app_id"\s*:\s*["']?(\d{10,20})["']?/i) ||
-      text.match(/app_id[=:]\s*["']?(\d{10,20})["']?/i);
-    if (appIdMatch) {
-      setAppId(appIdMatch[1]);
-      extracted.push('App ID');
-    }
-
-    // 5. Extract App Secret (32 hex characters)
-    const secretMatch = 
-      text.match(/"app_secret"\s*:\s*["']?([a-f0-9]{32})["']?/i) ||
-      text.match(/app_secret[=:]\s*["']?([a-f0-9]{32})["']?/i);
-    if (secretMatch) {
-      setAppSecret(secretMatch[1]);
-      extracted.push('App Secret');
-    }
-
-    // 6. Extract Verify Token
+    // 4. Extract Verify Token
     const verifyMatch = 
       text.match(/"webhook_verify_token"\s*:\s*["']?([^"',\s]+)["']?/i) ||
       text.match(/verify_token[=:]\s*["']?([^"',\s]+)["']?/i);
@@ -357,8 +336,6 @@ export const CloudApiSetupView: React.FC = () => {
         accessToken: accessToken.trim(),
         phoneNumberId: phoneNumberId.trim(),
         wabaId: wabaId.trim(),
-        appId: appId.trim(),
-        appSecret: appSecret.trim(),
         webhookVerifyToken: webhookVerifyToken.trim(),
         graphApiVersion
       });
@@ -527,7 +504,7 @@ export const CloudApiSetupView: React.FC = () => {
 
           <div className="flex items-center justify-between">
             <div className="text-[11px] text-indigo-800 font-medium">
-              {extractFeedback || 'Extracts: Access Token (EAAG...), Phone ID, WABA ID, App ID, App Secret, and Verify Token.'}
+              {extractFeedback || 'Extracts: Access Token (EAAG...), Phone ID, WABA ID, and Verify Token.'}
             </div>
             <button
               type="button"
@@ -744,48 +721,20 @@ export const CloudApiSetupView: React.FC = () => {
                 </div>
               </div>
 
-              {/* Row 3: Meta App ID & App Secret */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div className="space-y-1.5">
-                  <label className="block text-xs font-bold text-slate-700">
-                    Meta App ID
-                  </label>
-                  <input
-                    type="text"
-                    value={appId}
-                    onChange={(e) => setAppId(e.target.value)}
-                    placeholder="e.g. 18920192039481"
-                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg font-mono text-slate-800 focus:outline-none focus:border-blue-500"
-                  />
-                  <p className="text-[11px] text-slate-400">
-                    Meta Developer App ID from App Settings &rarr; Basic.
-                  </p>
-                </div>
-
-                <div className="space-y-1.5">
-                  <label className="block text-xs font-bold text-slate-700">
-                    Meta App Secret (HMAC Verification)
-                  </label>
-                  <div className="relative">
-                    <input
-                      type={showAppSecret ? 'text' : 'password'}
-                      value={appSecret}
-                      onChange={(e) => setAppSecret(e.target.value)}
-                      placeholder="e.g. 4f29a88c71b9e0293847..."
-                      className="w-full p-2.5 pr-10 bg-slate-50 border border-slate-200 rounded-lg font-mono text-slate-800 focus:outline-none focus:border-blue-500"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowAppSecret(!showAppSecret)}
-                      className="absolute right-2 top-2 p-1 text-slate-400 hover:text-slate-600 cursor-pointer"
-                    >
-                      {showAppSecret ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                    </button>
+              {/* Row 3: Meta App Global Architecture Notice */}
+              <div className="bg-slate-50 border border-slate-200 rounded-lg p-3.5 space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center space-x-2 text-xs font-bold text-slate-800">
+                    <ShieldCheck className="w-4 h-4 text-emerald-600" />
+                    <span>Global Meta App ID & Secret Architecture</span>
                   </div>
-                  <p className="text-[11px] text-slate-400">
-                    Used to cryptographically verify X-Hub-Signature-256 webhook headers.
-                  </p>
+                  <span className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 text-[10px] font-bold uppercase">
+                    Server Secured
+                  </span>
                 </div>
+                <p className="text-[11px] text-slate-500 leading-relaxed">
+                  Meta App ID (<code>META_APP_ID</code>) and App Secret (<code>META_APP_SECRET</code>) are configured globally via server environment variables. Individual users never input, manage, or store developer app secrets. All HMAC-SHA256 signature verification executes strictly server-side.
+                </p>
               </div>
 
               {/* Row 4: Webhook Verify Token & Graph API Version */}

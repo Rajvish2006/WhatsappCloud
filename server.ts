@@ -273,6 +273,8 @@ app.get('/api/whatsapp/config', (_req: Request, res: Response) => {
     wabaId: config.wabaId || 'Not Configured',
     phoneNumberId: config.phoneNumberId || 'Not Configured',
     webhookVerifyTokenConfigured: Boolean(config.webhookVerifyToken),
+    metaAppConfigured: Boolean(config.appSecret && config.appId),
+    appIdConfigured: Boolean(config.appId),
     appSecretConfigured: Boolean(config.appSecret),
     accessTokenConfigured: Boolean(config.accessToken),
     callbackUrl: `/api/webhooks/whatsapp`,
@@ -281,15 +283,13 @@ app.get('/api/whatsapp/config', (_req: Request, res: Response) => {
 
 /**
  * POST /api/whatsapp/config
- * Updates runtime Meta Cloud API configuration on the server
+ * Updates runtime Meta Cloud API parameters on the server (excluding global infrastructure secrets)
  */
 app.post('/api/whatsapp/config', (req: Request, res: Response) => {
   const {
     accessToken,
     phoneNumberId,
     wabaId,
-    appId,
-    appSecret,
     webhookVerifyToken,
     graphApiVersion,
   } = req.body;
@@ -298,7 +298,6 @@ app.post('/api/whatsapp/config', (req: Request, res: Response) => {
     ...(accessToken !== undefined && { accessToken: String(accessToken).trim() }),
     ...(phoneNumberId !== undefined && { phoneNumberId: String(phoneNumberId).trim() }),
     ...(wabaId !== undefined && { wabaId: String(wabaId).trim() }),
-    ...(appSecret !== undefined && { appSecret: String(appSecret).trim() }),
     ...(webhookVerifyToken !== undefined && { webhookVerifyToken: String(webhookVerifyToken).trim() }),
     ...(graphApiVersion !== undefined && { graphApiVersion: String(graphApiVersion).trim() }),
   });
@@ -310,6 +309,7 @@ app.post('/api/whatsapp/config', (req: Request, res: Response) => {
     graphApiVersion: updated.graphApiVersion,
     wabaId: updated.wabaId,
     phoneNumberId: updated.phoneNumberId,
+    metaAppConfigured: Boolean(updated.appSecret && updated.appId),
   });
 });
 

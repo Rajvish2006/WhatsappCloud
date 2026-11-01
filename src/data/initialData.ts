@@ -97,14 +97,10 @@ export const INITIAL_COMPANIES: Company[] = [
     timezone: 'Asia/Kolkata',
     currency: 'INR',
     cached_credit_balance: 25000,
-    wabaAccountId: 'waba_webcraft_01',
-    appId: '2182826355974603',
-    appSecret: '4f29a88c71b9e0293847a192837491b8',
     phoneNumberId: '123255029949291',
     webhookVerifyToken: 'webcraft_verify_token_whatsapp',
     webhookConnected: true,
     webhookConnectedAt: new Date().toISOString(),
-    hardSecretToken: 'wc_sec_live_79a29d81f203847291a8274b091827491028374a91b2c3d4',
     createdAt: new Date().toISOString()
   }
 ];
@@ -262,14 +258,11 @@ export const INITIAL_WABA_CONFIG: WABAConfig = {
   metaTier: 'TIER_100K',
   accessTokenMasked: 'EAAfBRN2N4csBSlerzNfWSpbjIp0dh2ZA7EBfJ...',
   webhookVerifyToken: 'webcraft_verify_token_whatsapp',
-  appSecretMasked: '4f29...91b8',
-  appSecret: '4f29a88c71b9e0293847a192837491b8',
-  appId: '2182826355974603',
   isConnected: true,
   webhookConnected: true,
   webhookConnectedAt: new Date().toISOString(),
   lastSyncedAt: new Date().toISOString(),
-  callbackUrl: 'https://whatsappcloud-virid.vercel.app/api/webhook'
+  callbackUrl: 'https://whatsappcloud-virid.vercel.app/api/webhooks/whatsapp'
 };
 
 export const INITIAL_TEMPLATES: MetaTemplate[] = [

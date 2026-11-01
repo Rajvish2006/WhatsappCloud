@@ -13,6 +13,7 @@ export interface MetaConfig {
   wabaId: string;
   phoneNumberId: string;
   appSecret: string;
+  appId?: string;
   webhookVerifyToken: string;
 }
 
@@ -105,9 +106,14 @@ export interface MetaPhoneNumbersResponse {
 let activeRuntimeMetaConfig: Partial<MetaConfig> = {};
 
 export function updateRuntimeMetaConfig(newConfig: Partial<MetaConfig>): MetaConfig {
+  // Security guarantee: Strip client attempts to set or override global infrastructure secrets
+  const sanitized = { ...newConfig };
+  delete sanitized.appSecret;
+  delete sanitized.appId;
+
   activeRuntimeMetaConfig = {
     ...activeRuntimeMetaConfig,
-    ...newConfig
+    ...sanitized
   };
   return getMetaConfig();
 }
@@ -117,7 +123,8 @@ export function getRuntimeMetaConfig(): Partial<MetaConfig> {
 }
 
 /**
- * Retrieve server-side Meta configuration from environment variables or active runtime config
+ * Retrieve server-side Meta configuration from environment variables or active runtime config.
+ * App ID and App Secret are STRICTLY global server environment variables (META_APP_ID, META_APP_SECRET).
  */
 export function getMetaConfig(overrides?: Partial<MetaConfig>): MetaConfig {
   const graphApiVersion = overrides?.graphApiVersion || activeRuntimeMetaConfig.graphApiVersion || process.env.META_GRAPH_API_VERSION || 'v22.0';
@@ -129,7 +136,9 @@ export function getMetaConfig(overrides?: Partial<MetaConfig>): MetaConfig {
     accessToken: overrides?.accessToken || activeRuntimeMetaConfig.accessToken || process.env.WHATSAPP_ACCESS_TOKEN || '',
     wabaId: overrides?.wabaId || activeRuntimeMetaConfig.wabaId || process.env.WHATSAPP_BUSINESS_ACCOUNT_ID || '',
     phoneNumberId: overrides?.phoneNumberId || activeRuntimeMetaConfig.phoneNumberId || process.env.WHATSAPP_PHONE_NUMBER_ID || '',
-    appSecret: overrides?.appSecret || activeRuntimeMetaConfig.appSecret || process.env.META_APP_SECRET || '',
+    // Global infrastructure secrets: STRICTLY server environment variables, never client override
+    appId: process.env.META_APP_ID || '',
+    appSecret: process.env.META_APP_SECRET || '',
     webhookVerifyToken: overrides?.webhookVerifyToken || activeRuntimeMetaConfig.webhookVerifyToken || process.env.WHATSAPP_WEBHOOK_VERIFY_TOKEN || 'webcraft_verify_token_whatsapp',
   };
 }

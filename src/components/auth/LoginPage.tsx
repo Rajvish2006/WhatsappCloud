@@ -9,9 +9,6 @@ import {
   ShieldCheck, 
   AlertCircle, 
   ArrowRight, 
-  Building2, 
-  Crown, 
-  Headphones, 
   KeyRound, 
   CheckCircle2, 
   HelpCircle,
@@ -50,16 +47,6 @@ export const LoginPage: React.FC = () => {
         setErrorMessage(res.error || 'Failed to authenticate');
       }
     }, 400);
-  };
-
-  const handleQuickLogin = (demoEmail: string) => {
-    setEmail(demoEmail);
-    setPassword('Password@123');
-    setErrorMessage(null);
-    const res = login(demoEmail, 'Password@123');
-    if (!res.success) {
-      setErrorMessage(res.error || 'Failed to authenticate');
-    }
   };
 
   const handleResetSubmit = (e: React.FormEvent) => {
@@ -187,50 +174,6 @@ export const LoginPage: React.FC = () => {
             <ArrowRight className="w-4 h-4" />
             </button>
           </form>
-
-          {/* Quick Demo Personas Click */}
-          <div className="pt-3 border-t border-slate-100">
-            <span className="text-[10px] uppercase font-bold text-slate-400 block mb-2 tracking-wider">
-              Instant Demo Personas (1-Click Switch)
-            </span>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-left">
-              <button
-                type="button"
-                onClick={() => handleQuickLogin('admin@webcraftsolution.com')}
-                className="p-2 border border-purple-200 bg-purple-50 hover:bg-purple-100 rounded-lg text-purple-900 text-xs flex items-center space-x-2 transition"
-              >
-                <Crown className="w-3.5 h-3.5 text-purple-600 shrink-0" />
-                <div className="truncate">
-                  <div className="font-bold text-[11px]">Super Admin</div>
-                  <div className="text-[9px] text-purple-600 font-mono truncate">admin@webcraft...</div>
-                </div>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => handleQuickLogin('vraj21712@gmail.com')}
-                className="p-2 border border-blue-200 bg-blue-50 hover:bg-blue-100 rounded-lg text-blue-900 text-xs flex items-center space-x-2 transition"
-              >
-                <Building2 className="w-3.5 h-3.5 text-blue-600 shrink-0" />
-                <div className="truncate">
-                  <div className="font-bold text-[11px]">Webcraft Admin</div>
-                  <div className="text-[9px] text-blue-600 font-mono truncate">vraj21712@...</div>
-                </div>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => handleQuickLogin('support@webcraftsolution.com')}
-                className="p-2 border border-emerald-200 bg-emerald-50 hover:bg-emerald-100 rounded-lg text-emerald-900 text-xs flex items-center space-x-2 transition"
-              >
-                <Headphones className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                <div className="truncate">
-                  <div className="font-bold text-[11px]">Support Agent</div>
-                  <div className="text-[9px] text-emerald-600 font-mono truncate">support@webcraft...</div>
-                </div>
-              </button>
-            </div>
-          </div>
 
           {/* Link to Register Company Page */}
           <div className="pt-3 border-t border-slate-100 text-center">

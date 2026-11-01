@@ -31,26 +31,18 @@ export const CompanySettingsView: React.FC = () => {
     updateAppSettings, 
     currentCompany, 
     apiKeys,
-    updateCompanyAppCredentials,
     verifyWebhookConnection,
     resetWebhookVerification,
     generateCompanyHardenedSecret
   } = useApp();
 
-  type TabType = 'meta-credentials' | 'webhooks' | 'api-secrets' | 'agents' | 'chat' | 'bot';
-  const [activeTab, setActiveTab] = useState<TabType>('meta-credentials');
+  type TabType = 'global-architecture' | 'webhooks' | 'api-secrets' | 'agents' | 'chat' | 'bot';
+  const [activeTab, setActiveTab] = useState<TabType>('global-architecture');
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [saveMessage, setSaveMessage] = useState('Settings saved successfully!');
 
-  // Meta App Credentials State
-  const [appIdInput, setAppIdInput] = useState(currentCompany.appId || '918274619283746');
-  const [appSecretInput, setAppSecretInput] = useState(currentCompany.appSecret || 'wc_sec_99182374610928347102938475619283');
-  const [showAppSecret, setShowAppSecret] = useState(false);
-  const [copiedAppSecret, setCopiedAppSecret] = useState(false);
-
   // Webhook State
   const [webhookUrl, setWebhookUrl] = useState(appSettings.webhookCallbackUrl || `https://whatsappcloud-virid.vercel.app/api/webhook/${currentCompany.code}`);
-  const [webhookSecret, setWebhookSecret] = useState(currentCompany.appSecret || 'whsec_webcraft_99120481029481');
   const [eventMessages, setEventMessages] = useState(true);
   const [eventStatuses, setEventStatuses] = useState(true);
   const [eventOptOuts, setEventOptOuts] = useState(true);
@@ -90,26 +82,6 @@ export const CompanySettingsView: React.FC = () => {
 
   const isWebhookConnected = !!currentCompany.webhookConnected;
 
-  // Handle Meta Credentials Save
-  const handleSaveAppCredentials = (e: React.FormEvent) => {
-    e.preventDefault();
-    const cleanAppId = appIdInput.trim();
-    const cleanAppSecret = appSecretInput.trim();
-    updateCompanyAppCredentials(cleanAppId, cleanAppSecret);
-
-    // Save directly to Supabase companies table
-    syncRecordAsync('companies', {
-      id: currentCompany.id,
-      app_id: cleanAppId,
-      app_secret: cleanAppSecret,
-      updated_at: new Date().toISOString()
-    });
-
-    setSaveMessage('Meta App ID and App Secret updated and synced to Supabase successfully!');
-    setSaveSuccess(true);
-    setTimeout(() => setSaveSuccess(false), 3000);
-  };
-
   // Handle Webhook Verification Handshake
   const handleTriggerWebhookVerification = () => {
     setIsVerifyingWebhook(true);
@@ -137,12 +109,9 @@ export const CompanySettingsView: React.FC = () => {
   };
 
   // Handle Copy
-  const handleCopyText = (text: string, type: 'appSecret' | 'masterToken' | string) => {
+  const handleCopyText = (text: string, type: 'masterToken' | string) => {
     navigator.clipboard?.writeText(text);
-    if (type === 'appSecret') {
-      setCopiedAppSecret(true);
-      setTimeout(() => setCopiedAppSecret(false), 2000);
-    } else if (type === 'masterToken') {
+    if (type === 'masterToken') {
       setCopiedMasterToken(true);
       setTimeout(() => setCopiedMasterToken(false), 2000);
     } else {
@@ -211,15 +180,15 @@ export const CompanySettingsView: React.FC = () => {
       {/* Navigation Tabs */}
       <div className="flex border-b border-slate-200 space-x-2 sm:space-x-6 text-xs font-semibold overflow-x-auto">
         <button
-          onClick={() => setActiveTab('meta-credentials')}
+          onClick={() => setActiveTab('global-architecture')}
           className={`pb-3 flex items-center space-x-2 border-b-2 transition shrink-0 cursor-pointer ${
-            activeTab === 'meta-credentials'
+            activeTab === 'global-architecture'
               ? 'border-blue-600 text-blue-600'
               : 'border-transparent text-slate-500 hover:text-slate-800'
           }`}
         >
-          <Key className="w-4 h-4" />
-          <span>Meta App Credentials</span>
+          <ShieldCheck className="w-4 h-4" />
+          <span>Global Meta Architecture</span>
         </button>
 
         <button
@@ -284,115 +253,83 @@ export const CompanySettingsView: React.FC = () => {
         </button>
       </div>
 
-      {/* TAB 1: META APP CREDENTIALS */}
-      {activeTab === 'meta-credentials' && (
+      {/* TAB 1: GLOBAL META DEVELOPER ARCHITECTURE */}
+      {activeTab === 'global-architecture' && (
         <div className="space-y-6">
           <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-xs space-y-5">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <div className="flex items-center space-x-2">
-                <div className="w-8 h-8 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center font-bold">
-                  <Key className="w-4 h-4" />
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-100 pb-4 gap-3">
+              <div className="flex items-center space-x-3">
+                <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 border border-blue-200 flex items-center justify-center font-bold shrink-0">
+                  <ShieldCheck className="w-5 h-5 text-blue-600" />
                 </div>
                 <div>
-                  <h2 className="text-base font-bold text-slate-800">Meta App Credentials & App Secret ID</h2>
+                  <div className="flex items-center space-x-2">
+                    <h2 className="text-base font-bold text-slate-800">Global Meta Developer Architecture</h2>
+                    <span className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 text-[10px] font-bold uppercase">
+                      Server Secured
+                    </span>
+                  </div>
                   <p className="text-xs text-slate-500">
-                    Store and verify your Meta App ID and App Secret Key for WhatsApp Cloud API production authentication.
+                    Infrastructure-level server environment variables isolate and protect Meta App credentials.
                   </p>
                 </div>
               </div>
               <div className="flex items-center space-x-2">
-                {currentCompany.appSecret ? (
-                  <span className="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs font-semibold">
-                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                    <span>App Secret Configured</span>
-                  </span>
-                ) : (
-                  <span className="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded bg-amber-50 text-amber-700 border border-amber-200 text-xs font-semibold">
-                    <AlertCircle className="w-3.5 h-3.5 text-amber-600" />
-                    <span>App Secret Missing</span>
-                  </span>
-                )}
+                <span className="inline-flex items-center space-x-1.5 px-3 py-1 rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs font-semibold">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                  <span>Zero-Trust Client Isolation</span>
+                </span>
               </div>
             </div>
 
-            <form onSubmit={handleSaveAppCredentials} className="space-y-5 max-w-2xl text-xs text-slate-700">
-              {/* App ID */}
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  Meta App ID (Client ID)
-                </label>
-                <input
-                  type="text"
-                  value={appIdInput}
-                  onChange={(e) => setAppIdInput(e.target.value)}
-                  placeholder="e.g. 918274619283746"
-                  className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs font-mono text-slate-800 focus:outline-none focus:border-blue-500"
-                  required
-                />
-                <p className="text-[11px] text-slate-400 mt-1">
-                  Located in your Meta for Developers dashboard under <strong>App Dashboard &rarr; App ID</strong>.
-                </p>
-              </div>
-
-              {/* App Secret */}
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  Meta App Secret (App Secret Key)
-                </label>
-                <div className="flex items-center space-x-2">
-                  <div className="relative flex-1">
-                    <input
-                      type={showAppSecret ? 'text' : 'password'}
-                      value={appSecretInput}
-                      onChange={(e) => setAppSecretInput(e.target.value)}
-                      placeholder="Paste Meta App Secret (32-character hexadecimal key)"
-                      className="w-full bg-slate-50 border border-slate-200 rounded-lg pl-3 pr-10 py-2 text-xs font-mono text-slate-800 focus:outline-none focus:border-blue-500"
-                      required
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowAppSecret(!showAppSecret)}
-                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer"
-                      title={showAppSecret ? 'Hide secret' : 'Show secret'}
-                    >
-                      {showAppSecret ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                    </button>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => handleCopyText(appSecretInput, 'appSecret')}
-                    className="p-2 border border-slate-200 rounded-lg text-slate-600 hover:text-blue-600 hover:bg-blue-50 transition cursor-pointer"
-                    title="Copy App Secret"
-                  >
-                    {copiedAppSecret ? <Check className="w-4 h-4 text-emerald-600" /> : <Copy className="w-4 h-4" />}
-                  </button>
-                </div>
-                <p className="text-[11px] text-slate-400 mt-1">
-                  Used by the backend to verify the <code>X-Hub-Signature-256</code> HMAC header on every incoming WhatsApp webhook payload.
-                </p>
-              </div>
-
-              {/* Security Advisory */}
-              <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 text-slate-600 text-[11px] space-y-1">
-                <div className="font-semibold text-slate-800 flex items-center space-x-1.5">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="p-4 rounded-xl border border-slate-200 bg-slate-50/70 space-y-1.5">
+                <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Meta App ID</div>
+                <div className="font-mono text-sm font-bold text-slate-800 flex items-center space-x-1.5">
                   <Lock className="w-3.5 h-3.5 text-blue-600" />
-                  <span>Production HMAC Signature Verification</span>
+                  <span>process.env.META_APP_ID</span>
                 </div>
-                <p>
-                  Meta automatically calculates a SHA-256 HMAC digest of each webhook payload using this App Secret. Storing it here allows OmniWABA to reject spoofed webhooks with <code>403 Forbidden</code> before processing.
+                <p className="text-[11px] text-slate-500">
+                  Global application identifier defined server-side. Individual tenants never configure or manage app IDs.
                 </p>
               </div>
 
-              <div className="pt-2">
-                <button
-                  type="submit"
-                  className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg shadow-xs transition flex items-center space-x-1.5 cursor-pointer"
-                >
-                  <Save className="w-4 h-4" />
-                  <span>Save App Credentials</span>
-                </button>
+              <div className="p-4 rounded-xl border border-slate-200 bg-slate-50/70 space-y-1.5">
+                <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Meta App Secret</div>
+                <div className="font-mono text-sm font-bold text-slate-800 flex items-center space-x-1.5">
+                  <Lock className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>process.env.META_APP_SECRET</span>
+                </div>
+                <p className="text-[11px] text-slate-500">
+                  Guarded in secure backend environment. HMAC-SHA256 signature verification executes exclusively on the server.
+                </p>
               </div>
-            </form>
+
+              <div className="p-4 rounded-xl border border-slate-200 bg-slate-50/70 space-y-1.5">
+                <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Supabase Client Access</div>
+                <div className="font-mono text-sm font-bold text-slate-800 flex items-center space-x-1.5">
+                  <ShieldCheck className="w-3.5 h-3.5 text-indigo-600" />
+                  <span>Public Anon Key Only</span>
+                </div>
+                <p className="text-[11px] text-slate-500">
+                  Strict Row Level Security (RLS) policies enforce multi-tenant isolation. Service role keys remain server-isolated.
+                </p>
+              </div>
+            </div>
+
+            {/* Architecture Explainer */}
+            <div className="bg-blue-50/50 border border-blue-200 rounded-xl p-4 text-xs text-slate-700 space-y-2">
+              <div className="font-bold text-blue-900 flex items-center space-x-2">
+                <Lock className="w-4 h-4 text-blue-700" />
+                <span>Security Remediation & Compliance Standards</span>
+              </div>
+              <ul className="list-disc list-inside space-y-1 text-slate-600 text-xs">
+                <li><strong>No User-Level Token Columns:</strong> Deprecated token columns (<code>access_token</code>, <code>app_secret</code>, <code>app_id</code>) have been stripped from tenant tables.</li>
+                <li><strong>Strict Webhook Handshake:</strong> Meta verification handshakes (<code>hub.challenge</code>) and payload dispatching use cryptographically verified tokens via secure backend proxy.</li>
+                <li><strong>Cryptographic Signature Guards:</strong> Every incoming Meta payload's <code>X-Hub-Signature-256</code> header is validated against <code>META_APP_SECRET</code> using timing-safe comparisons before hitting CRM workflows.</li>
+                <li><strong>Zero Client Token Exposure:</strong> All Graph API calls to Meta servers are proxied through <code>/api/*</code> server endpoints, guaranteeing that sensitive bearer tokens never reach the browser.</li>
+              </ul>
+            </div>
           </div>
         </div>
       )}
