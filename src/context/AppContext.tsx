@@ -703,6 +703,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       currency: 'INR',
       cached_credit_balance: initialMarketingQuota + initialUtilityQuota,
       wabaAccountId: data.wabaMode === 'SANDBOX' ? `waba_sandbox_${Date.now()}` : undefined,
+      webhookVerifyToken: hardSecretToken,
       webhookConnected: false, // Connection pending until verified!
       createdAt: new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' })
     };
@@ -800,6 +801,28 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       newCompanyId,
       newComp.name
     );
+
+    // Sync new company directly to Supabase
+    syncRecordAsync('companies', {
+      id: newComp.id,
+      company_uid: newComp.company_uid,
+      name: newComp.name,
+      code: newComp.code,
+      status: newComp.status,
+      plan_id: newComp.planId,
+      plan_name: newComp.planName,
+      owner_name: newComp.ownerName,
+      owner_email: newComp.ownerEmail,
+      phone: newComp.phone,
+      mobile: newComp.mobile,
+      address: newComp.address,
+      timezone: newComp.timezone,
+      currency: newComp.currency,
+      cached_credit_balance: newComp.cached_credit_balance,
+      webhook_verify_token: hardSecretToken,
+      webhook_connected: false,
+      created_at: new Date().toISOString()
+    });
 
     // Auto-login to new company portal
     setCurrentCompanyId(newCompanyId);

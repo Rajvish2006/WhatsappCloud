@@ -42,13 +42,13 @@ export const CompanySettingsView: React.FC = () => {
   const [saveMessage, setSaveMessage] = useState('Settings saved successfully!');
 
   // Webhook State
-  const [webhookUrl, setWebhookUrl] = useState(appSettings.webhookCallbackUrl || `https://whatsappcloud-virid.vercel.app/api/webhook/${currentCompany.code}`);
+  const [webhookUrl, setWebhookUrl] = useState(appSettings.webhookCallbackUrl || 'https://whatsappcloud-virid.vercel.app/api/webhooks/whatsapp');
   const [eventMessages, setEventMessages] = useState(true);
   const [eventStatuses, setEventStatuses] = useState(true);
   const [eventOptOuts, setEventOptOuts] = useState(true);
   const [isVerifyingWebhook, setIsVerifyingWebhook] = useState(false);
   const [verifyFeedback, setVerifyFeedback] = useState<string | null>(null);
-  const [webhookSecret, setWebhookSecret] = useState(currentCompany.webhookVerifyToken || 'webcraft_verify_token_whatsapp');
+  const [webhookSecret, setWebhookSecret] = useState(currentCompany.webhookVerifyToken || 'wc_sec_live_9f83b27e8a4d7c1e56b02f84');
 
   // Hardened Tokens State
   const [showMasterSecret, setShowMasterSecret] = useState(false);
@@ -147,7 +147,14 @@ export const CompanySettingsView: React.FC = () => {
       blacklistedPhoneNumbers: blacklistArray.join('\n')
     });
 
-    setSaveMessage('Company settings saved successfully!');
+    // Also persist verify token to Supabase
+    syncRecordAsync('companies', {
+      id: currentCompany.id,
+      webhook_verify_token: webhookSecret,
+      updated_at: new Date().toISOString()
+    });
+
+    setSaveMessage('Company settings & Webhook configuration saved successfully!');
     setSaveSuccess(true);
     setTimeout(() => setSaveSuccess(false), 3000);
   };
@@ -439,52 +446,104 @@ export const CompanySettingsView: React.FC = () => {
 
             <form onSubmit={handleSaveGeneral} className="space-y-5 max-w-2xl text-xs text-slate-700">
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  Tenant Webhook URL
-                </label>
-                <div className="relative">
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-xs font-semibold text-slate-700">
+                    Tenant Webhook Callback URL
+                  </label>
+                  <div className="flex items-center space-x-2">
+                    <button
+                      type="button"
+                      onClick={() => setWebhookUrl('https://whatsappcloud-virid.vercel.app/api/webhooks/whatsapp')}
+                      className="text-[10px] text-blue-600 hover:underline font-bold"
+                    >
+                      Use Standard URL
+                    </button>
+                    <span className="text-slate-300">|</span>
+                    <button
+                      type="button"
+                      onClick={() => setWebhookUrl(`https://whatsappcloud-virid.vercel.app/api/webhooks/whatsapp/+${webhookSecret}`)}
+                      className="text-[10px] text-blue-600 hover:underline font-bold"
+                    >
+                      Use +Token URL
+                    </button>
+                  </div>
+                </div>
+                <div className="relative flex items-center space-x-1.5">
                   <input
                     type="url"
                     value={webhookUrl}
                     onChange={(e) => setWebhookUrl(e.target.value)}
                     disabled={!isWebhookConnected}
-                    placeholder="https://whatsappcloud-virid.vercel.app/api/webhook"
+                    placeholder="https://whatsappcloud-virid.vercel.app/api/webhooks/whatsapp"
                     className={`w-full border rounded-lg px-3 py-2 text-xs font-mono focus:outline-none transition ${
                       !isWebhookConnected
                         ? 'bg-slate-100 border-slate-200 text-slate-400 cursor-not-allowed select-none'
                         : 'bg-slate-50 border-slate-200 text-slate-800 focus:border-blue-500'
                     }`}
                   />
+                  <button
+                    type="button"
+                    onClick={() => handleCopyText(webhookUrl, 'webhookUrl')}
+                    className="px-3 py-2 bg-slate-100 hover:bg-slate-200 border border-slate-200 rounded-lg text-slate-700 text-xs font-semibold flex items-center space-x-1 cursor-pointer shrink-0"
+                    title="Copy URL"
+                  >
+                    {copiedKeyId === 'webhookUrl' ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+                    <span>{copiedKeyId === 'webhookUrl' ? 'Copied' : 'Copy'}</span>
+                  </button>
                   {!isWebhookConnected && (
-                    <Lock className="w-4 h-4 text-slate-400 absolute right-3 top-2.5" />
+                    <Lock className="w-4 h-4 text-slate-400 absolute right-18 top-2.5" />
                   )}
                 </div>
                 <p className="text-[11px] text-slate-400 mt-1">
-                  OmniWABA posts JSON events to this endpoint whenever customer messages, replies, or delivery receipts arrive.
+                  Meta Cloud API dispatches GET handshake challenge and POST messages to this endpoint.
                 </p>
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  Webhook Signature Secret (whsec_...)
-                </label>
-                <div className="relative">
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-xs font-semibold text-slate-700">
+                    Webhook Verify Token (Fixed Strong Token)
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const hex = Array.from({ length: 32 }, () => Math.floor(Math.random() * 16).toString(16)).join('');
+                      setWebhookSecret(`wc_sec_live_${hex}`);
+                    }}
+                    className="text-[10px] text-blue-600 hover:underline font-bold"
+                  >
+                    Generate Fixed Strong Token
+                  </button>
+                </div>
+                <div className="relative flex items-center space-x-1.5">
                   <input
                     type="text"
                     value={webhookSecret}
                     onChange={(e) => setWebhookSecret(e.target.value)}
                     disabled={!isWebhookConnected}
-                    placeholder="whsec_..."
+                    placeholder="wc_sec_live_..."
                     className={`w-full border rounded-lg px-3 py-2 text-xs font-mono focus:outline-none transition ${
                       !isWebhookConnected
                         ? 'bg-slate-100 border-slate-200 text-slate-400 cursor-not-allowed select-none'
                         : 'bg-slate-50 border-slate-200 text-slate-800 focus:border-blue-500'
                     }`}
                   />
+                  <button
+                    type="button"
+                    onClick={() => handleCopyText(webhookSecret, 'webhookSecret')}
+                    className="px-3 py-2 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-lg text-emerald-800 text-xs font-bold flex items-center space-x-1 cursor-pointer shrink-0"
+                    title="Copy Verify Token"
+                  >
+                    {copiedKeyId === 'webhookSecret' ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+                    <span>{copiedKeyId === 'webhookSecret' ? 'Copied' : 'Copy Token'}</span>
+                  </button>
                   {!isWebhookConnected && (
-                    <Lock className="w-4 h-4 text-slate-400 absolute right-3 top-2.5" />
+                    <Lock className="w-4 h-4 text-slate-400 absolute right-24 top-2.5" />
                   )}
                 </div>
+                <p className="text-[11px] text-slate-400 mt-1">
+                  Enter this token in Meta App Dashboard as the <strong>Verify Token</strong>.
+                </p>
               </div>
 
               <div>

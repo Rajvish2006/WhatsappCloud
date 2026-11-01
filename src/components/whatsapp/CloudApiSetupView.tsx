@@ -31,6 +31,7 @@ import {
   updateWhatsAppDisplayName, 
   testWebhookHandshakeEndpoint 
 } from '../../lib/metaApiClient';
+import { generateHardenedSecretToken } from '../../lib/tokenUtils';
 
 export const CloudApiSetupView: React.FC = () => {
   const { 
@@ -54,7 +55,7 @@ export const CloudApiSetupView: React.FC = () => {
   );
   const [wabaId, setWabaId] = useState(currentCompany.wabaId || wabaConfig.wabaId || '392817492049182');
   const [webhookVerifyToken, setWebhookVerifyToken] = useState(
-    currentCompany.webhookVerifyToken || wabaConfig.webhookVerifyToken || 'webcraft_verify_token_whatsapp'
+    currentCompany.webhookVerifyToken || wabaConfig.webhookVerifyToken || 'wc_sec_live_9f83b27e8a4d7c1e56b02f84'
   );
   const [graphApiVersion, setGraphApiVersion] = useState(currentCompany.graphApiVersion || wabaConfig.graphApiVersion || 'v22.0');
 
@@ -74,7 +75,7 @@ export const CloudApiSetupView: React.FC = () => {
 
   // Live Webhook URL Tester State
   const [isTestingWebhookUrl, setIsTestingWebhookUrl] = useState(false);
-  const [webhookTestTarget, setWebhookTestTarget] = useState<'prod' | 'local'>('prod');
+  const [webhookTestTarget, setWebhookTestTarget] = useState<'prod_whatsapp' | 'prod_path' | 'prod_webhook' | 'local'>('prod_whatsapp');
   const [webhookTestResult, setWebhookTestResult] = useState<{
     success: boolean;
     statusCode: number;
@@ -83,10 +84,9 @@ export const CloudApiSetupView: React.FC = () => {
     challengeSent: string;
   } | null>(null);
 
-  // UI Visibility Toggles
+  // UI Visibility Toggles & Multi-copy state
   const [showAccessToken, setShowAccessToken] = useState(false);
-  const [copiedCallback, setCopiedCallback] = useState(false);
-  const [copiedVerify, setCopiedVerify] = useState(false);
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
   // Quick Extract Tool State
   const [showExtractTool, setShowExtractTool] = useState(false);
@@ -115,26 +115,22 @@ export const CloudApiSetupView: React.FC = () => {
   const [isSendingTest, setIsSendingTest] = useState(false);
   const [testResult, setTestResult] = useState<string | null>(null);
 
-  // URLs
-  const prodCallbackUrl = `https://whatsappcloud-virid.vercel.app/api/webhook`;
+  // WhatsApp Webhook URLs
+  const prodWhatsAppCallbackUrl = `https://whatsappcloud-virid.vercel.app/api/webhooks/whatsapp`;
+  const pathTokenCallbackUrl = `https://whatsappcloud-virid.vercel.app/api/webhooks/whatsapp/+${webhookVerifyToken}`;
+  const prodWebhookUrl = `https://whatsappcloud-virid.vercel.app/api/webhook`;
   const localCallbackUrl = typeof window !== 'undefined' 
     ? `${window.location.origin}/api/webhooks/whatsapp` 
     : '/api/webhooks/whatsapp';
 
-  const handleCopy = (text: string, type: 'callback' | 'verify') => {
+  const handleCopy = (text: string, key: string) => {
     navigator.clipboard?.writeText(text);
-    if (type === 'callback') {
-      setCopiedCallback(true);
-      setTimeout(() => setCopiedCallback(false), 2000);
-    } else {
-      setCopiedVerify(true);
-      setTimeout(() => setCopiedVerify(false), 2000);
-    }
+    setCopiedKey(key);
+    setTimeout(() => setCopiedKey(null), 2000);
   };
 
   const generateRandomVerifyToken = () => {
-    const randomHex = Array.from({ length: 32 }, () => Math.floor(Math.random() * 16).toString(16)).join('');
-    const newToken = `wc_verify_${randomHex}`;
+    const newToken = generateHardenedSecretToken('wc_sec_live', 32);
     setWebhookVerifyToken(newToken);
   };
 
@@ -269,7 +265,11 @@ export const CloudApiSetupView: React.FC = () => {
   const handleTestLiveWebhookHandshake = async () => {
     setIsTestingWebhookUrl(true);
     setWebhookTestResult(null);
-    const targetUrl = webhookTestTarget === 'prod' ? prodCallbackUrl : localCallbackUrl;
+    let targetUrl = prodWhatsAppCallbackUrl;
+    if (webhookTestTarget === 'prod_path') targetUrl = pathTokenCallbackUrl;
+    else if (webhookTestTarget === 'prod_webhook') targetUrl = prodWebhookUrl;
+    else if (webhookTestTarget === 'local') targetUrl = localCallbackUrl;
+
     try {
       const result = await testWebhookHandshakeEndpoint(targetUrl, webhookVerifyToken.trim());
       setWebhookTestResult(result);
@@ -862,52 +862,110 @@ export const CloudApiSetupView: React.FC = () => {
               </div>
 
               {/* Webhook Endpoints & Handshake Instructions */}
-              <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-3">
+              <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-3.5">
                 <div className="flex items-center justify-between">
                   <h4 className="text-xs font-bold text-slate-800 flex items-center space-x-1.5">
                     <Radio className="w-3.5 h-3.5 text-blue-600" />
-                    <span>Meta Webhook Callback URL Endpoints</span>
+                    <span>Meta Webhook Callback URL & Strong Token Endpoints</span>
                   </h4>
-                  <span className="text-[10px] bg-blue-100 text-blue-800 font-mono px-2 py-0.5 rounded font-bold">
+                  <span className="text-[10px] bg-emerald-100 text-emerald-800 font-mono px-2 py-0.5 rounded font-bold">
                     hub.challenge ready
                   </span>
                 </div>
 
-                <div className="space-y-2">
+                <p className="text-[11px] text-slate-500">
+                  Configure these exact values inside your <strong>Meta App Dashboard &rarr; WhatsApp &rarr; Configuration &rarr; Webhook</strong>.
+                </p>
+
+                <div className="space-y-3">
+                  {/* Primary URL */}
                   <div>
-                    <span className="text-[10px] font-bold text-slate-500 block uppercase">1. Production Cloud Webhook URL</span>
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-bold text-slate-700 uppercase">1. Meta Callback URL (Standard Production)</span>
+                      <span className="text-[9px] bg-emerald-50 text-emerald-700 px-1.5 py-0.2 rounded font-bold">Recommended</span>
+                    </div>
                     <div className="flex items-center space-x-2 mt-0.5">
                       <input
                         type="text"
                         readOnly
-                        value={prodCallbackUrl}
+                        value={prodWhatsAppCallbackUrl}
                         className="flex-1 bg-white border border-slate-200 rounded-lg p-2 font-mono text-[11px] text-slate-700 select-all"
                       />
                       <button
                         type="button"
-                        onClick={() => handleCopy(prodCallbackUrl, 'callback')}
-                        className="px-3 py-2 bg-white hover:bg-slate-100 border border-slate-200 rounded-lg text-xs font-semibold text-slate-700 transition"
+                        onClick={() => handleCopy(prodWhatsAppCallbackUrl, 'prod_whatsapp')}
+                        className="px-3 py-2 bg-white hover:bg-slate-100 border border-slate-200 rounded-lg text-xs font-semibold text-slate-700 transition flex items-center space-x-1"
+                        title="Copy Callback URL"
                       >
-                        {copiedCallback ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+                        {copiedKey === 'prod_whatsapp' ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+                        <span className="hidden sm:inline">{copiedKey === 'prod_whatsapp' ? 'Copied' : 'Copy'}</span>
                       </button>
                     </div>
                   </div>
 
+                  {/* Path-Embedded Token URL */}
                   <div>
-                    <span className="text-[10px] font-bold text-slate-500 block uppercase">2. Direct Workspace Webhook URL</span>
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-bold text-slate-700 uppercase">2. Callback URL with Path-Embedded Token (+Verify Token)</span>
+                      <span className="text-[9px] bg-blue-50 text-blue-700 px-1.5 py-0.2 rounded font-bold">Self-Verifying Path</span>
+                    </div>
                     <div className="flex items-center space-x-2 mt-0.5">
                       <input
                         type="text"
                         readOnly
-                        value={localCallbackUrl}
+                        value={pathTokenCallbackUrl}
                         className="flex-1 bg-white border border-slate-200 rounded-lg p-2 font-mono text-[11px] text-slate-700 select-all"
                       />
                       <button
                         type="button"
-                        onClick={() => handleCopy(localCallbackUrl, 'callback')}
+                        onClick={() => handleCopy(pathTokenCallbackUrl, 'prod_path')}
+                        className="px-3 py-2 bg-white hover:bg-slate-100 border border-slate-200 rounded-lg text-xs font-semibold text-slate-700 transition flex items-center space-x-1"
+                        title="Copy Path-Embedded Callback URL"
+                      >
+                        {copiedKey === 'prod_path' ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+                        <span className="hidden sm:inline">{copiedKey === 'prod_path' ? 'Copied' : 'Copy'}</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Fixed Strong Verify Token */}
+                  <div>
+                    <span className="text-[10px] font-bold text-slate-700 block uppercase">3. Fixed Strong Webhook Verify Token</span>
+                    <div className="flex items-center space-x-2 mt-0.5">
+                      <input
+                        type="text"
+                        readOnly
+                        value={webhookVerifyToken}
+                        className="flex-1 bg-white border border-slate-200 rounded-lg p-2 font-mono text-[11px] text-emerald-700 font-bold select-all"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => handleCopy(webhookVerifyToken, 'verify_token')}
+                        className="px-3 py-2 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-lg text-xs font-bold text-emerald-800 transition flex items-center space-x-1"
+                        title="Copy Verify Token for Meta Form"
+                      >
+                        {copiedKey === 'verify_token' ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+                        <span>{copiedKey === 'verify_token' ? 'Copied' : 'Copy Token'}</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* General /api/webhook Endpoint */}
+                  <div className="pt-1">
+                    <span className="text-[10px] font-bold text-slate-500 block uppercase">4. Fallback Serverless Endpoint (/api/webhook)</span>
+                    <div className="flex items-center space-x-2 mt-0.5">
+                      <input
+                        type="text"
+                        readOnly
+                        value={prodWebhookUrl}
+                        className="flex-1 bg-white border border-slate-200 rounded-lg p-2 font-mono text-[11px] text-slate-500 select-all"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => handleCopy(prodWebhookUrl, 'prod_webhook')}
                         className="px-3 py-2 bg-white hover:bg-slate-100 border border-slate-200 rounded-lg text-xs font-semibold text-slate-700 transition"
                       >
-                        <Copy className="w-3.5 h-3.5" />
+                        {copiedKey === 'prod_webhook' ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
                       </button>
                     </div>
                   </div>
@@ -1007,22 +1065,36 @@ export const CloudApiSetupView: React.FC = () => {
             </p>
 
             <div className="space-y-2">
-              <div className="flex items-center space-x-2 text-[11px]">
-                <label className="text-slate-600 font-semibold">Target Endpoint:</label>
-                <div className="flex bg-slate-100 p-0.5 rounded-lg text-[10px] font-bold">
+              <div className="space-y-1 text-[11px]">
+                <label className="text-slate-600 font-semibold block">Target Endpoint for Simulation:</label>
+                <div className="grid grid-cols-2 gap-1 bg-slate-100 p-1 rounded-lg text-[10px] font-bold">
                   <button
                     type="button"
-                    onClick={() => setWebhookTestTarget('prod')}
-                    className={`px-2 py-1 rounded cursor-pointer transition ${webhookTestTarget === 'prod' ? 'bg-white text-blue-700 shadow-xs' : 'text-slate-600'}`}
+                    onClick={() => setWebhookTestTarget('prod_whatsapp')}
+                    className={`p-1.5 rounded cursor-pointer transition text-center ${webhookTestTarget === 'prod_whatsapp' ? 'bg-white text-emerald-700 shadow-xs' : 'text-slate-600'}`}
                   >
-                    /api/webhook (Prod)
+                    /api/webhooks/whatsapp
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setWebhookTestTarget('prod_path')}
+                    className={`p-1.5 rounded cursor-pointer transition text-center ${webhookTestTarget === 'prod_path' ? 'bg-white text-blue-700 shadow-xs' : 'text-slate-600'}`}
+                  >
+                    +TOKEN (Path)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setWebhookTestTarget('prod_webhook')}
+                    className={`p-1.5 rounded cursor-pointer transition text-center ${webhookTestTarget === 'prod_webhook' ? 'bg-white text-indigo-700 shadow-xs' : 'text-slate-600'}`}
+                  >
+                    /api/webhook
                   </button>
                   <button
                     type="button"
                     onClick={() => setWebhookTestTarget('local')}
-                    className={`px-2 py-1 rounded cursor-pointer transition ${webhookTestTarget === 'local' ? 'bg-white text-blue-700 shadow-xs' : 'text-slate-600'}`}
+                    className={`p-1.5 rounded cursor-pointer transition text-center ${webhookTestTarget === 'local' ? 'bg-white text-amber-700 shadow-xs' : 'text-slate-600'}`}
                   >
-                    /api/webhooks/whatsapp
+                    Workspace Dev
                   </button>
                 </div>
               </div>

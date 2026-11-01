@@ -98,7 +98,7 @@ export const INITIAL_COMPANIES: Company[] = [
     currency: 'INR',
     cached_credit_balance: 25000,
     phoneNumberId: '123255029949291',
-    webhookVerifyToken: 'webcraft_verify_token_whatsapp',
+    webhookVerifyToken: 'wc_sec_live_9f83b27e8a4d7c1e56b02f84',
     webhookConnected: true,
     webhookConnectedAt: new Date().toISOString(),
     createdAt: new Date().toISOString()
@@ -257,7 +257,7 @@ export const INITIAL_WABA_CONFIG: WABAConfig = {
   qualityRating: 'GREEN',
   metaTier: 'TIER_100K',
   accessTokenMasked: 'EAAfBRN2N4csBSlerzNfWSpbjIp0dh2ZA7EBfJ...',
-  webhookVerifyToken: 'webcraft_verify_token_whatsapp',
+  webhookVerifyToken: 'wc_sec_live_9f83b27e8a4d7c1e56b02f84',
   isConnected: true,
   webhookConnected: true,
   webhookConnectedAt: new Date().toISOString(),
