@@ -2,6 +2,14 @@
   "framework": "vite",
   "rewrites": [
     {
+      "source": "/api/webhook",
+      "destination": "/api/webhook"
+    },
+    {
+      "source": "/api/webhooks/whatsapp",
+      "destination": "/api/webhooks/whatsapp"
+    },
+    {
       "source": "/((?!api/.*).*)",
       "destination": "/index.html"
     }

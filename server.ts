@@ -2,6 +2,7 @@ import express, { Request, Response } from 'express';
 import { createServer as createViteServer } from 'vite';
 import path from 'path';
 import dotenv from 'dotenv';
+import { createClient } from '@supabase/supabase-js';
 import {
   getMetaConfig,
   updateRuntimeMetaConfig,
@@ -17,6 +18,21 @@ import {
 
 // Load environment variables
 dotenv.config();
+
+// Initialize Supabase for server-side persistence
+function getServerSupabase() {
+  const url = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL;
+  const key = 
+    process.env.SUPABASE_SERVICE_ROLE_KEY || 
+    process.env.SUPABASE_ANON_KEY || 
+    process.env.VITE_SUPABASE_ANON_KEY || 
+    process.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+
+  if (url && key && !url.includes('mock-instance')) {
+    return createClient(url, key);
+  }
+  return null;
+}
 
 const app = express();
 // AI Studio dev server environment constraint: must always listen on port 3000
@@ -162,6 +178,9 @@ const webhookPostHandler = (req: any, res: Response) => {
     return;
   }
 
+  const supabase = getServerSupabase();
+  const companyId = process.env.DEFAULT_COMPANY_ID || 'cmp_webcraft';
+
   try {
     for (const entry of body.entry || []) {
       for (const change of entry.changes || []) {
@@ -181,6 +200,22 @@ const webhookPostHandler = (req: any, res: Response) => {
             },
             signatureValid,
           });
+
+          if (supabase && value.message_template_name) {
+            (async () => {
+              try {
+                await supabase.from('templates')
+                  .update({
+                    status: (value.event || 'APPROVED').toUpperCase(),
+                    rejection_reason: value.reason || null,
+                    last_synced_at: new Date().toISOString()
+                  })
+                  .or(`name.eq.${value.message_template_name},whatsapp_template_name.eq.${value.message_template_name}`);
+              } catch (err: any) {
+                console.warn('[Supabase Server Sync Template]', err);
+              }
+            })();
+          }
           continue;
         }
 
@@ -205,6 +240,21 @@ const webhookPostHandler = (req: any, res: Response) => {
               },
               signatureValid,
             });
+
+            if (supabase && wamid) {
+              (async () => {
+                try {
+                  await supabase.from('messages')
+                    .update({ 
+                      delivery_status: status,
+                      error_code: errors ? JSON.stringify(errors) : null 
+                    })
+                    .or(`waba_message_id.eq.${wamid},whatsapp_message_id.eq.${wamid},id.eq.${wamid}`);
+                } catch (err: any) {
+                  console.warn('[Supabase Server Sync Message Status]', err);
+                }
+              })();
+            }
           }
         }
 
@@ -244,6 +294,70 @@ const webhookPostHandler = (req: any, res: Response) => {
               },
               signatureValid,
             });
+
+            if (supabase) {
+              const convId = `conv_${from.replace(/\D/g, '')}`;
+              const formattedPhone = from.startsWith('+') ? from : `+${from}`;
+
+              (async () => {
+                try {
+                  // Upsert contact
+                  await supabase.from('contacts').upsert({
+                    id: `cnt_${from.replace(/\D/g, '')}`,
+                    company_id: companyId,
+                    phone: formattedPhone,
+                    name: contactName,
+                    consent_status: 'OPTED_IN',
+                    consent_source: 'INBOUND_WHATSAPP',
+                    consent_timestamp: messageIso,
+                    updated_at: messageIso
+                  }, { onConflict: 'id' });
+
+                  // Upsert conversation
+                  await supabase.from('conversations').upsert({
+                    id: convId,
+                    company_id: companyId,
+                    contact_id: `cnt_${from.replace(/\D/g, '')}`,
+                    contact_phone: formattedPhone,
+                    contact_name: contactName,
+                    status: 'open',
+                    unread_count: 1,
+                    last_message: text,
+                    last_message_time: 'just now',
+                    created_at: messageIso
+                  }, { onConflict: 'id' });
+
+                  // Insert message
+                  await supabase.from('messages').upsert({
+                    id: wamid || `msg_${Date.now()}`,
+                    conversation_id: convId,
+                    company_id: companyId,
+                    direction: 'inbound',
+                    sender_type: 'CUSTOMER',
+                    sender_name: contactName,
+                    content: text,
+                    media_type: type || 'text',
+                    delivery_status: 'delivered',
+                    waba_message_id: wamid,
+                    whatsapp_message_id: wamid,
+                    timestamp: messageIso,
+                    created_at: messageIso
+                  }, { onConflict: 'id' });
+
+                  // Insert audit log
+                  await supabase.from('audit_logs').insert({
+                    id: `aud_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+                    company_id: companyId,
+                    category: 'WHATSAPP',
+                    action: 'WEBHOOK_INBOUND_MESSAGE',
+                    details: `Received inbound WhatsApp message from ${from} (${contactName})`,
+                    timestamp: messageIso
+                  });
+                } catch (err: any) {
+                  console.warn('[Supabase Server Inbound Sync]', err);
+                }
+              })();
+            }
           }
         }
       }

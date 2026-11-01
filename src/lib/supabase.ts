@@ -1,4 +1,3 @@
-
 import { createClient, SupabaseClient } from "@supabase/supabase-js";
 
 function getStoredValue(key: string, envFallback: string): string {
@@ -11,8 +10,19 @@ function getStoredValue(key: string, envFallback: string): string {
   return envFallback || "";
 }
 
-let currentUrl = getStoredValue("omniwaba_supabase_url", import.meta.env.VITE_SUPABASE_URL || "");
-let currentKey = getStoredValue("omniwaba_supabase_key", import.meta.env.VITE_SUPABASE_ANON_KEY || import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || "");
+// Safely resolve environment variables across Vite client and Node.js backend
+const envUrl = 
+  (typeof import.meta !== 'undefined' && import.meta.env?.VITE_SUPABASE_URL) ||
+  (typeof process !== 'undefined' && (process.env?.VITE_SUPABASE_URL || process.env?.SUPABASE_URL)) ||
+  "";
+
+const envKey = 
+  (typeof import.meta !== 'undefined' && (import.meta.env?.VITE_SUPABASE_ANON_KEY || import.meta.env?.VITE_SUPABASE_PUBLISHABLE_KEY)) ||
+  (typeof process !== 'undefined' && (process.env?.SUPABASE_SERVICE_ROLE_KEY || process.env?.SUPABASE_ANON_KEY || process.env?.VITE_SUPABASE_ANON_KEY || process.env?.VITE_SUPABASE_PUBLISHABLE_KEY)) ||
+  "";
+
+let currentUrl = getStoredValue("omniwaba_supabase_url", envUrl);
+let currentKey = getStoredValue("omniwaba_supabase_key", envKey);
 
 /**
  * Validates whether a provided key is a service_role key.
@@ -32,10 +42,13 @@ export function isServiceRoleKey(key: string): boolean {
 
 export function getSupabaseConfig(): { url: string; key: string; isConfigured: boolean; isServiceRoleWarning: boolean } {
   const isServiceRole = isServiceRoleKey(currentKey);
+  const isValidUrl = currentUrl && !currentUrl.includes("mock-instance") && (currentUrl.startsWith("http://") || currentUrl.startsWith("https://"));
+  const isValidKey = currentKey && !currentKey.includes("mock-anon-key") && currentKey.length > 20;
+
   return {
     url: currentUrl,
     key: currentKey,
-    isConfigured: Boolean(currentUrl && currentKey && !currentUrl.includes("mock-instance")),
+    isConfigured: Boolean(isValidUrl && isValidKey),
     isServiceRoleWarning: isServiceRole,
   };
 }
@@ -50,7 +63,7 @@ export function updateSupabaseClient(url: string, key: string): SupabaseClient {
   const cleanKey = key.trim();
 
   if (isServiceRoleKey(cleanKey)) {
-    console.error('[SECURITY ALERT] Administrative service role credentials detected in browser client. This key bypasses Row Level Security and must only be stored in secure backend environments. Please use the public ANON key.');
+    console.error('[SECURITY ALERT] Administrative service role credentials detected in browser client. Please use the public ANON key in client browsers.');
   }
 
   currentUrl = cleanUrl;
@@ -69,4 +82,3 @@ export function updateSupabaseClient(url: string, key: string): SupabaseClient {
   );
   return supabase;
 }
-

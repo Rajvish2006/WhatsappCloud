@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { COMPLETE_SQL_DDL, SCHEMA_TABLES, SCHEMA_MIGRATIONS, SchemaTable } from '../../services/sqlSchema';
-import { SUPABASE_RLS_FIX_SQL } from '../../lib/supabaseService';
+import { SUPABASE_RLS_FIX_SQL, getSupabaseConfig, updateSupabaseCredentials } from '../../lib/supabaseService';
 import { useApp } from '../../context/AppContext';
 import { 
   Database, 
@@ -20,7 +20,11 @@ import {
   CloudDownload,
   CheckCircle2,
   AlertTriangle,
-  Server
+  Server,
+  Eye,
+  EyeOff,
+  Save,
+  Lock
 } from 'lucide-react';
 
 export const DatabaseSchemaViewer: React.FC = () => {
@@ -31,7 +35,30 @@ export const DatabaseSchemaViewer: React.FC = () => {
   const [copied, setCopied] = useState(false);
   const [copiedSupabase, setCopiedSupabase] = useState(false);
   const [isPushing, setIsPushing] = useState(false);
-  const [pushResult, setPushResult] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  const [pushResult, setPushResult] = useState<{ message: string; type: 'success' | 'error'; tableErrors?: Record<string, string> } | null>(null);
+
+  // Supabase Credentials Manager State
+  const [supabaseUrlInput, setSupabaseUrlInput] = useState(() => getSupabaseConfig().url);
+  const [supabaseKeyInput, setSupabaseKeyInput] = useState(() => getSupabaseConfig().key);
+  const [showKey, setShowKey] = useState(false);
+  const [isSavingCreds, setIsSavingCreds] = useState(false);
+  const [credsSaveNotice, setCredsSaveNotice] = useState<string | null>(null);
+
+  const handleSaveCredentials = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    setIsSavingCreds(true);
+    setCredsSaveNotice(null);
+    try {
+      updateSupabaseCredentials(supabaseUrlInput.trim(), supabaseKeyInput.trim());
+      await syncWithSupabase();
+      setCredsSaveNotice('Supabase credentials saved and connection refreshed successfully!');
+      setTimeout(() => setCredsSaveNotice(null), 4000);
+    } catch (err: any) {
+      setCredsSaveNotice(`Error: ${err?.message || 'Failed to update credentials'}`);
+    } finally {
+      setIsSavingCreds(false);
+    }
+  };
 
   const handlePushAll = async () => {
     setIsPushing(true);
@@ -41,14 +68,15 @@ export const DatabaseSchemaViewer: React.FC = () => {
       if (res.success) {
         const total = Object.values(res.syncedCounts).reduce((a, b) => a + b, 0);
         setPushResult({
-          message: `Successfully shared ${total} records across all 14 tables to Supabase!`,
+          message: `Successfully uploaded ${total} records across ${Object.keys(res.syncedCounts).length} tables to Supabase!`,
           type: 'success'
         });
       } else {
         const errCount = Object.keys(res.errors).length;
         setPushResult({
-          message: `Push completed with issues on ${errCount} table(s). Check RLS policies below.`,
-          type: 'error'
+          message: `Push completed with issues on ${errCount} table(s). Check the specific errors below:`,
+          type: 'error',
+          tableErrors: res.errors
         });
       }
     } catch (e: any) {
@@ -493,27 +521,120 @@ export const DatabaseSchemaViewer: React.FC = () => {
               </div>
             </div>
 
+            {/* Supabase Connection & Credentials Configuration Box */}
+            <div className="p-4 bg-slate-950/80 border border-slate-800 rounded-xl space-y-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800/80 pb-2.5">
+                <div className="flex items-center space-x-2">
+                  <Lock className="w-4 h-4 text-emerald-400" />
+                  <span className="text-xs font-bold text-white uppercase tracking-wider">
+                    Supabase Project Connection & Public Anon Key
+                  </span>
+                </div>
+                <span className="text-[11px] text-slate-400">
+                  Client connects via public Anon Key. Credentials are securely retained.
+                </span>
+              </div>
+
+              <form onSubmit={handleSaveCredentials} className="grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
+                <div className="md:col-span-5">
+                  <label className="block text-[11px] font-semibold text-slate-400 mb-1">
+                    Supabase Project URL (e.g. https://xyz.supabase.co)
+                  </label>
+                  <input
+                    type="text"
+                    value={supabaseUrlInput}
+                    onChange={(e) => setSupabaseUrlInput(e.target.value)}
+                    placeholder="https://your-project-id.supabase.co"
+                    className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-white placeholder-slate-500 font-mono focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+
+                <div className="md:col-span-5">
+                  <label className="block text-[11px] font-semibold text-slate-400 mb-1">
+                    Supabase Public Anon Key (Never input Service Role key in browser)
+                  </label>
+                  <div className="relative">
+                    <input
+                      type={showKey ? 'text' : 'password'}
+                      value={supabaseKeyInput}
+                      onChange={(e) => setSupabaseKeyInput(e.target.value)}
+                      placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+                      className="w-full bg-slate-900 border border-slate-700 rounded-lg pl-3 pr-8 py-1.5 text-xs text-white placeholder-slate-500 font-mono focus:outline-none focus:border-emerald-500"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowKey(!showKey)}
+                      className="absolute right-2 top-2 text-slate-400 hover:text-white"
+                    >
+                      {showKey ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="md:col-span-2 flex items-center space-x-2">
+                  <button
+                    type="submit"
+                    disabled={isSavingCreds}
+                    className="w-full py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-lg font-bold text-xs flex items-center justify-center space-x-1.5 transition cursor-pointer shadow-sm"
+                  >
+                    <Save className="w-3.5 h-3.5" />
+                    <span>{isSavingCreds ? 'Connecting...' : 'Save & Connect'}</span>
+                  </button>
+                </div>
+              </form>
+
+              {credsSaveNotice && (
+                <div className="text-xs text-emerald-400 font-semibold flex items-center space-x-1.5 pt-1">
+                  <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                  <span>{credsSaveNotice}</span>
+                </div>
+              )}
+            </div>
+
             {/* Sync Feedback Message */}
             {pushResult && (
-              <div className={`p-3.5 rounded-lg text-xs flex items-center justify-between ${
-                pushResult.type === 'success' 
-                  ? 'bg-emerald-950/60 border border-emerald-500/40 text-emerald-300' 
-                  : 'bg-amber-950/60 border border-amber-500/40 text-amber-300'
-              }`}>
-                <div className="flex items-center space-x-2">
-                  {pushResult.type === 'success' ? (
-                    <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                  ) : (
-                    <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
-                  )}
-                  <span>{pushResult.message}</span>
+              <div className="space-y-2">
+                <div className={`p-3.5 rounded-lg text-xs flex items-center justify-between ${
+                  pushResult.type === 'success' 
+                    ? 'bg-emerald-950/60 border border-emerald-500/40 text-emerald-300' 
+                    : 'bg-amber-950/60 border border-amber-500/40 text-amber-300'
+                }`}>
+                  <div className="flex items-center space-x-2">
+                    {pushResult.type === 'success' ? (
+                      <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                    ) : (
+                      <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+                    )}
+                    <span>{pushResult.message}</span>
+                  </div>
+                  <button 
+                    onClick={() => setPushResult(null)}
+                    className="text-slate-400 hover:text-white text-xs px-2 py-0.5"
+                  >
+                    Dismiss
+                  </button>
                 </div>
-                <button 
-                  onClick={() => setPushResult(null)}
-                  className="text-slate-400 hover:text-white text-xs px-2 py-0.5"
-                >
-                  Dismiss
-                </button>
+
+                {/* Per-Table Error Inspector */}
+                {pushResult.tableErrors && Object.keys(pushResult.tableErrors).length > 0 && (
+                  <div className="p-3 bg-red-950/50 border border-red-500/40 rounded-lg text-xs text-red-200 space-y-2">
+                    <div className="font-bold flex items-center space-x-1.5 text-red-400">
+                      <AlertTriangle className="w-3.5 h-3.5" />
+                      <span>Table Upload Error Breakdown:</span>
+                    </div>
+                    <div className="space-y-1 font-mono text-[11px] max-h-48 overflow-y-auto">
+                      {Object.entries(pushResult.tableErrors).map(([tbl, err]) => (
+                        <div key={tbl} className="p-1.5 bg-black/40 rounded border border-red-800/40 flex items-start space-x-2">
+                          <span className="font-bold text-red-400 shrink-0">{tbl}:</span>
+                          <span className="text-slate-300 break-all">{err}</span>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="text-[11px] text-slate-300 pt-1">
+                      💡 <em>Fix:</em> Copy the <strong>Full Setup SQL</strong> script using the button above and execute it in your <strong>Supabase Dashboard &rarr; SQL Editor</strong> to create missing tables and grant full access.
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 

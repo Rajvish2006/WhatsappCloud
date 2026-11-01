@@ -1,4 +1,4 @@
-import { supabase } from './supabase';
+import { supabase, getSupabaseConfig as getBaseConfig, updateSupabaseClient } from './supabase';
 
 export interface SupabaseStatus {
   isConfigured: boolean;
@@ -313,8 +313,14 @@ CREATE TABLE IF NOT EXISTS public.app_settings (
 );
 
 -- =========================================================================
--- Disable RLS and Grant Full Privileges for Seamless CRM Sync
+-- Permissions: Grant Full Access and Disable RLS to allow seamless sync
 -- =========================================================================
+GRANT ALL ON SCHEMA public TO anon, authenticated, service_role;
+GRANT ALL ON ALL TABLES IN SCHEMA public TO anon, authenticated, service_role;
+GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO anon, authenticated, service_role;
+GRANT ALL ON ALL ROUTINES IN SCHEMA public TO anon, authenticated, service_role;
+
+-- Disable Row Level Security on all 14 tables
 ALTER TABLE IF EXISTS public.companies DISABLE ROW LEVEL SECURITY;
 ALTER TABLE IF EXISTS public.users DISABLE ROW LEVEL SECURITY;
 ALTER TABLE IF EXISTS public.contacts DISABLE ROW LEVEL SECURITY;
@@ -329,13 +335,7 @@ ALTER TABLE IF EXISTS public.credit_ledger DISABLE ROW LEVEL SECURITY;
 ALTER TABLE IF EXISTS public.tenant_api_keys DISABLE ROW LEVEL SECURITY;
 ALTER TABLE IF EXISTS public.audit_logs DISABLE ROW LEVEL SECURITY;
 ALTER TABLE IF EXISTS public.app_settings DISABLE ROW LEVEL SECURITY;
-
-GRANT ALL ON ALL TABLES IN SCHEMA public TO anon, authenticated;
-GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO anon, authenticated;
-GRANT ALL ON ALL ROUTINES IN SCHEMA public TO anon, authenticated;
 `;
-
-import { getSupabaseConfig as getBaseConfig, updateSupabaseClient } from './supabase';
 
 export const getSupabaseConfig = () => {
   return getBaseConfig();
@@ -345,6 +345,18 @@ export const updateSupabaseCredentials = (url: string, key: string) => {
   updateSupabaseClient(url, key);
   return getBaseConfig();
 };
+
+// Helper to safely format ISO timestamp or null
+function toIsoOrNull(val: any): string | null {
+  if (!val) return null;
+  if (typeof val === 'string' && val.trim() === '') return null;
+  try {
+    const d = new Date(val);
+    return isNaN(d.getTime()) ? null : d.toISOString();
+  } catch {
+    return null;
+  }
+}
 
 export async function checkSupabaseConnection(): Promise<SupabaseStatus> {
   const { url, isConfigured } = getSupabaseConfig();
@@ -412,12 +424,12 @@ export async function checkSupabaseConnection(): Promise<SupabaseStatus> {
         tableCounts[table] = count || 0;
         isConnected = true;
       } else {
-        if (error.code === '42501' || error.message?.includes('row-level security')) {
+        if (error.code === '42501' || error.message?.includes('row-level security') || error.message?.includes('permission denied')) {
           tablesAvailable[table] = true;
           isConnected = true;
           isRlsRestricted = true;
           tableCounts[table] = 0;
-        } else if (error.code !== 'PGRST205' && !error.message?.includes('does not exist')) {
+        } else if (error.code !== 'PGRST205' && !error.message?.includes('does not exist') && !error.message?.includes('relation')) {
           tablesAvailable[table] = true;
           isConnected = true;
         } else {
@@ -466,6 +478,11 @@ export async function saveSupabaseRecord(
   onConflictKey = 'id'
 ): Promise<{ success: boolean; error?: string; isRlsError?: boolean }> {
   try {
+    const { isConfigured } = getSupabaseConfig();
+    if (!isConfigured) {
+      return { success: false, error: 'Supabase URL or Key not configured' };
+    }
+
     const { error } = await supabase
       .from(tableName)
       .upsert(record, { onConflict: onConflictKey });
@@ -516,7 +533,7 @@ export async function deleteSupabaseRecord(
 }
 
 /**
- * Pushes all in-memory platform state into Supabase tables
+ * Pushes all in-memory platform state into Supabase tables with complete sanitization
  */
 export async function pushAllDataToSupabase(payload: {
   companies: any[];
@@ -541,6 +558,17 @@ export async function pushAllDataToSupabase(payload: {
   const syncedCounts: Record<string, number> = {};
   const errors: Record<string, string> = {};
 
+  const { isConfigured } = getSupabaseConfig();
+  if (!isConfigured) {
+    return {
+      success: false,
+      syncedCounts: {},
+      errors: {
+        credentials: 'Supabase URL and Anon Key are not configured. Please input your credentials in the Supabase Sync tab or configure VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.'
+      }
+    };
+  }
+
   // 1. Companies
   try {
     const companyRecords = payload.companies.map(c => ({
@@ -548,7 +576,7 @@ export async function pushAllDataToSupabase(payload: {
       company_uid: c.company_uid || c.code,
       name: c.name,
       code: c.code,
-      status: c.status,
+      status: c.status || 'active',
       plan_id: c.planId,
       plan_name: c.planName,
       owner_name: c.ownerName,
@@ -556,9 +584,9 @@ export async function pushAllDataToSupabase(payload: {
       phone: c.phone,
       mobile: c.mobile,
       address: c.address,
-      timezone: c.timezone,
-      currency: c.currency,
-      cached_credit_balance: c.cached_credit_balance || 0,
+      timezone: c.timezone || 'Asia/Kolkata',
+      currency: c.currency || 'INR',
+      cached_credit_balance: Number(c.cached_credit_balance || 0),
       waba_id: c.wabaId || c.wabaAccountId,
       phone_number_id: c.phoneNumberId,
       access_token: c.accessToken,
@@ -568,12 +596,18 @@ export async function pushAllDataToSupabase(payload: {
       verified_name: c.verifiedName,
       quality_rating: c.qualityRating,
       webhook_connected: c.webhookConnected ?? false,
-      webhook_connected_at: c.webhookConnectedAt,
-      created_at: c.createdAt
+      webhook_connected_at: toIsoOrNull(c.webhookConnectedAt),
+      created_at: toIsoOrNull(c.createdAt) || new Date().toISOString(),
+      updated_at: new Date().toISOString()
     }));
-    const { error } = await supabase.from('companies').upsert(companyRecords, { onConflict: 'id' });
-    if (error) errors.companies = error.message;
-    else syncedCounts.companies = companyRecords.length;
+
+    if (companyRecords.length > 0) {
+      const { error } = await supabase.from('companies').upsert(companyRecords, { onConflict: 'id' });
+      if (error) errors.companies = error.message;
+      else syncedCounts.companies = companyRecords.length;
+    } else {
+      syncedCounts.companies = 0;
+    }
   } catch (e: any) {
     errors.companies = e.message;
   }
@@ -590,14 +624,20 @@ export async function pushAllDataToSupabase(payload: {
       status: u.status || 'active',
       is_active: u.isActive ?? true,
       avatar: u.avatar,
-      last_login_at: u.lastLoginAt,
+      last_login_at: toIsoOrNull(u.lastLoginAt),
       is_online: u.isOnline ?? false,
-      active_chat_count: u.activeChatCount || 0,
-      max_chat_capacity: u.maxChatCapacity || 5
+      active_chat_count: Number(u.activeChatCount || 0),
+      max_chat_capacity: Number(u.maxChatCapacity || 5),
+      created_at: toIsoOrNull(u.createdAt) || new Date().toISOString()
     }));
-    const { error } = await supabase.from('users').upsert(userRecords, { onConflict: 'id' });
-    if (error) errors.users = error.message;
-    else syncedCounts.users = userRecords.length;
+
+    if (userRecords.length > 0) {
+      const { error } = await supabase.from('users').upsert(userRecords, { onConflict: 'id' });
+      if (error) errors.users = error.message;
+      else syncedCounts.users = userRecords.length;
+    } else {
+      syncedCounts.users = 0;
+    }
   } catch (e: any) {
     errors.users = e.message;
   }
@@ -611,18 +651,23 @@ export async function pushAllDataToSupabase(payload: {
       name: c.name,
       email: c.email,
       country_code: c.country_code || '+91',
-      consent_status: c.consentStatus,
-      consent_source: c.consentSource,
-      consent_timestamp: c.consentTimestamp,
+      consent_status: c.consentStatus || 'OPTED_IN',
+      consent_source: c.consentSource || 'MANUAL',
+      consent_timestamp: toIsoOrNull(c.consentTimestamp) || new Date().toISOString(),
       tags: c.tags || [],
       groups: c.groups || [],
       custom_attributes: c.customAttributes || {},
-      created_at: c.createdAt,
-      updated_at: c.updatedAt
+      created_at: toIsoOrNull(c.createdAt) || new Date().toISOString(),
+      updated_at: new Date().toISOString()
     }));
-    const { error } = await supabase.from('contacts').upsert(contactRecords, { onConflict: 'id' });
-    if (error) errors.contacts = error.message;
-    else syncedCounts.contacts = contactRecords.length;
+
+    if (contactRecords.length > 0) {
+      const { error } = await supabase.from('contacts').upsert(contactRecords, { onConflict: 'id' });
+      if (error) errors.contacts = error.message;
+      else syncedCounts.contacts = contactRecords.length;
+    } else {
+      syncedCounts.contacts = 0;
+    }
   } catch (e: any) {
     errors.contacts = e.message;
   }
@@ -634,14 +679,19 @@ export async function pushAllDataToSupabase(payload: {
       company_id: g.companyId,
       name: g.name,
       description: g.description,
-      contact_count: g.contactCount || 0,
+      contact_count: Number(g.contactCount || 0),
       is_dynamic: g.isDynamic ?? false,
       filter_criteria: g.filterCriteria,
-      created_at: g.createdAt
+      created_at: toIsoOrNull(g.createdAt) || new Date().toISOString()
     }));
-    const { error } = await supabase.from('contact_groups').upsert(groupRecords, { onConflict: 'id' });
-    if (error) errors.contact_groups = error.message;
-    else syncedCounts.contact_groups = groupRecords.length;
+
+    if (groupRecords.length > 0) {
+      const { error } = await supabase.from('contact_groups').upsert(groupRecords, { onConflict: 'id' });
+      if (error) errors.contact_groups = error.message;
+      else syncedCounts.contact_groups = groupRecords.length;
+    } else {
+      syncedCounts.contact_groups = 0;
+    }
   } catch (e: any) {
     errors.contact_groups = e.message;
   }
@@ -654,22 +704,28 @@ export async function pushAllDataToSupabase(payload: {
       meta_template_id: t.metaTemplateId || t.id,
       name: t.name,
       whatsapp_template_name: t.whatsapp_template_name || t.name,
-      category: t.category,
-      language: t.language,
-      status: t.status,
+      category: t.category || 'MARKETING',
+      language: t.language || 'en_US',
+      status: t.status || 'APPROVED',
       rejection_reason: t.rejectionReason,
-      header_type: t.headerType,
+      header_type: t.headerType || 'NONE',
       header_text: t.headerText,
-      body_text: t.bodyText,
-      variables_count: t.variablesCount || 0,
+      body_text: t.bodyText || '',
+      variables_count: Number(t.variablesCount || 0),
       sample_values: t.sampleValues || [],
       footer_text: t.footerText,
       buttons: t.buttons || [],
-      last_synced_at: t.lastSyncedAt
+      last_synced_at: toIsoOrNull(t.lastSyncedAt) || new Date().toISOString(),
+      created_at: toIsoOrNull(t.createdAt) || new Date().toISOString()
     }));
-    const { error } = await supabase.from('templates').upsert(templateRecords, { onConflict: 'id' });
-    if (error) errors.templates = error.message;
-    else syncedCounts.templates = templateRecords.length;
+
+    if (templateRecords.length > 0) {
+      const { error } = await supabase.from('templates').upsert(templateRecords, { onConflict: 'id' });
+      if (error) errors.templates = error.message;
+      else syncedCounts.templates = templateRecords.length;
+    } else {
+      syncedCounts.templates = 0;
+    }
   } catch (e: any) {
     errors.templates = e.message;
   }
@@ -680,36 +736,41 @@ export async function pushAllDataToSupabase(payload: {
       id: camp.id,
       company_id: camp.companyId,
       name: camp.name,
-      category: camp.category,
+      category: camp.category || 'MARKETING',
       template_id: camp.templateId,
       template_name: camp.templateName,
-      status: camp.status,
-      total_recipients: camp.totalRecipients || camp.recipient_count || 0,
-      recipient_count: camp.recipient_count || camp.totalRecipients || 0,
-      sent_count: camp.sentCount || 0,
-      delivered_count: camp.deliveredCount || 0,
-      read_count: camp.readCount || 0,
-      failed_count: camp.failedCount || 0,
-      skipped_count: camp.skippedCount || 0,
-      credits_reserved: camp.creditsReserved || camp.reserved_credits || 0,
-      reserved_credits: camp.reserved_credits || camp.creditsReserved || 0,
-      credits_consumed: camp.creditsConsumed || camp.consumed_credits || 0,
-      consumed_credits: camp.consumed_credits || camp.creditsConsumed || 0,
-      credits_refunded: camp.creditsRefunded || camp.released_credits || 0,
-      released_credits: camp.released_credits || camp.creditsRefunded || 0,
-      batch_size: camp.batchSize || 50,
-      concurrency: camp.concurrency || 4,
-      send_rate_ms: camp.sendRateMs || 200,
-      max_retry_attempts: camp.maxRetryAttempts || 3,
+      status: camp.status || 'queued',
+      total_recipients: Number(camp.totalRecipients || camp.recipient_count || 0),
+      recipient_count: Number(camp.recipient_count || camp.totalRecipients || 0),
+      sent_count: Number(camp.sentCount || 0),
+      delivered_count: Number(camp.deliveredCount || 0),
+      read_count: Number(camp.readCount || 0),
+      failed_count: Number(camp.failedCount || 0),
+      skipped_count: Number(camp.skippedCount || 0),
+      credits_reserved: Number(camp.creditsReserved || camp.reserved_credits || 0),
+      reserved_credits: Number(camp.reserved_credits || camp.creditsReserved || 0),
+      credits_consumed: Number(camp.creditsConsumed || camp.consumed_credits || 0),
+      consumed_credits: Number(camp.consumed_credits || camp.creditsConsumed || 0),
+      credits_refunded: Number(camp.creditsRefunded || camp.released_credits || 0),
+      released_credits: Number(camp.released_credits || camp.creditsRefunded || 0),
+      batch_size: Number(camp.batchSize || 50),
+      concurrency: Number(camp.concurrency || 4),
+      send_rate_ms: Number(camp.sendRateMs || 200),
+      max_retry_attempts: Number(camp.maxRetryAttempts || 3),
       variable_mapping: camp.variableMapping || {},
       recipients: camp.recipients || [],
-      started_at: camp.startedAt,
-      completed_at: camp.completedAt,
-      created_at: camp.createdAt
+      started_at: toIsoOrNull(camp.startedAt),
+      completed_at: toIsoOrNull(camp.completedAt),
+      created_at: toIsoOrNull(camp.createdAt) || new Date().toISOString()
     }));
-    const { error } = await supabase.from('campaigns').upsert(campaignRecords, { onConflict: 'id' });
-    if (error) errors.campaigns = error.message;
-    else syncedCounts.campaigns = campaignRecords.length;
+
+    if (campaignRecords.length > 0) {
+      const { error } = await supabase.from('campaigns').upsert(campaignRecords, { onConflict: 'id' });
+      if (error) errors.campaigns = error.message;
+      else syncedCounts.campaigns = campaignRecords.length;
+    } else {
+      syncedCounts.campaigns = 0;
+    }
   } catch (e: any) {
     errors.campaigns = e.message;
   }
@@ -722,21 +783,23 @@ export async function pushAllDataToSupabase(payload: {
         id: m.id,
         conversation_id: m.conversationId,
         company_id: m.companyId,
-        direction: m.direction,
-        sender_type: m.senderType,
+        direction: (m.direction || 'outgoing').toLowerCase(),
+        sender_type: m.senderType || 'AGENT',
         sender_name: m.senderName,
         sender_id: m.senderId,
-        content: m.content,
+        content: m.content || '',
         media_url: m.mediaUrl,
         media_type: m.mediaType || 'none',
         template_id: m.templateId,
-        delivery_status: m.deliveryStatus,
-        error_code: m.errorCode,
-        waba_message_id: m.wabaMessageId,
-        whatsapp_message_id: m.whatsapp_message_id,
-        timestamp: m.timestamp,
-        is_internal_note: m.isInternalNote ?? false
+        delivery_status: m.deliveryStatus || 'sent',
+        error_code: m.errorCode ? String(m.errorCode) : null,
+        waba_message_id: m.wabaMessageId || m.wamid,
+        whatsapp_message_id: m.whatsapp_message_id || m.wamid || m.id,
+        timestamp: toIsoOrNull(m.timestamp) || new Date().toISOString(),
+        is_internal_note: Boolean(m.isInternalNote),
+        created_at: new Date().toISOString()
       }));
+
       const { error } = await supabase.from('messages').upsert(msgRecords, { onConflict: 'id' });
       if (error) errors.messages = error.message;
       else syncedCounts.messages = msgRecords.length;
@@ -757,17 +820,22 @@ export async function pushAllDataToSupabase(payload: {
       contact_name: conv.contactName,
       assigned_agent_id: conv.assignedAgentId,
       assigned_agent_name: conv.assignedAgentName,
-      status: conv.status,
-      is_bot_handled: conv.isBotHandled ?? false,
-      unread_count: conv.unreadCount || 0,
+      status: (conv.status || 'open').toLowerCase(),
+      is_bot_handled: Boolean(conv.isBotHandled),
+      unread_count: Number(conv.unreadCount || 0),
       last_message: conv.lastMessage,
       last_message_time: conv.lastMessageTime,
       tags: conv.tags || [],
-      created_at: conv.createdAt
+      created_at: toIsoOrNull(conv.createdAt) || new Date().toISOString()
     }));
-    const { error } = await supabase.from('conversations').upsert(convRecords, { onConflict: 'id' });
-    if (error) errors.conversations = error.message;
-    else syncedCounts.conversations = convRecords.length;
+
+    if (convRecords.length > 0) {
+      const { error } = await supabase.from('conversations').upsert(convRecords, { onConflict: 'id' });
+      if (error) errors.conversations = error.message;
+      else syncedCounts.conversations = convRecords.length;
+    } else {
+      syncedCounts.conversations = 0;
+    }
   } catch (e: any) {
     errors.conversations = e.message;
   }
@@ -778,21 +846,27 @@ export async function pushAllDataToSupabase(payload: {
       id: b.id,
       company_id: b.companyId,
       name: b.name,
-      priority: b.priority || 10,
+      priority: Number(b.priority || 10),
       trigger_type: b.triggerType || 'CONTAINS',
       trigger_text: b.trigger_text || b.triggerText,
       response_text: b.response_text || b.responseText || b.replyText,
       keywords: b.keywords || [],
-      case_sensitive: b.caseSensitive ?? false,
+      case_sensitive: Boolean(b.caseSensitive),
       action_type: b.actionType || 'SEND_TEXT',
       reply_text: b.replyText || b.response_text,
-      hit_count: b.hitCount || 0,
+      hit_count: Number(b.hitCount || 0),
       is_active: b.isActive ?? true,
-      status: b.status || 'active'
+      status: b.status || 'active',
+      created_at: new Date().toISOString()
     }));
-    const { error } = await supabase.from('bot_rules').upsert(botRecords, { onConflict: 'id' });
-    if (error) errors.bot_rules = error.message;
-    else syncedCounts.bot_rules = botRecords.length;
+
+    if (botRecords.length > 0) {
+      const { error } = await supabase.from('bot_rules').upsert(botRecords, { onConflict: 'id' });
+      if (error) errors.bot_rules = error.message;
+      else syncedCounts.bot_rules = botRecords.length;
+    } else {
+      syncedCounts.bot_rules = 0;
+    }
   } catch (e: any) {
     errors.bot_rules = e.message;
   }
@@ -801,18 +875,23 @@ export async function pushAllDataToSupabase(payload: {
   try {
     const walletRecords = Object.values(payload.wallets).map(w => ({
       company_id: w.companyId,
-      marketing_total: w.marketingTotal,
-      marketing_reserved: w.marketingReserved,
-      marketing_consumed: w.marketingConsumed,
-      utility_total: w.utilityTotal,
-      utility_reserved: w.utilityReserved,
-      utility_consumed: w.utilityConsumed,
-      last_reconciled_at: w.lastReconciledAt,
+      marketing_total: Number(w.marketingTotal || 0),
+      marketing_reserved: Number(w.marketingReserved || 0),
+      marketing_consumed: Number(w.marketingConsumed || 0),
+      utility_total: Number(w.utilityTotal || 0),
+      utility_reserved: Number(w.utilityReserved || 0),
+      utility_consumed: Number(w.utilityConsumed || 0),
+      last_reconciled_at: toIsoOrNull(w.lastReconciledAt) || new Date().toISOString(),
       updated_at: new Date().toISOString()
     }));
-    const { error } = await supabase.from('credit_wallets').upsert(walletRecords, { onConflict: 'company_id' });
-    if (error) errors.credit_wallets = error.message;
-    else syncedCounts.credit_wallets = walletRecords.length;
+
+    if (walletRecords.length > 0) {
+      const { error } = await supabase.from('credit_wallets').upsert(walletRecords, { onConflict: 'company_id' });
+      if (error) errors.credit_wallets = error.message;
+      else syncedCounts.credit_wallets = walletRecords.length;
+    } else {
+      syncedCounts.credit_wallets = 0;
+    }
   } catch (e: any) {
     errors.credit_wallets = e.message;
   }
@@ -824,20 +903,25 @@ export async function pushAllDataToSupabase(payload: {
       company_id: l.companyId,
       category: l.category,
       type: l.type,
-      amount: l.amount,
-      before_balance: l.beforeBalance || 0,
-      after_balance: l.afterBalance || 0,
+      amount: Number(l.amount || 0),
+      before_balance: Number(l.beforeBalance || 0),
+      after_balance: Number(l.afterBalance || 0),
       reference_type: l.referenceType,
       reference_id: l.referenceId,
       reason: l.reason,
       idempotency_key: l.idempotencyKey,
-      timestamp: l.timestamp,
+      timestamp: toIsoOrNull(l.timestamp) || new Date().toISOString(),
       actor_id: l.actorId,
       actor_email: l.actorEmail
     }));
-    const { error } = await supabase.from('credit_ledger').upsert(ledgerRecords, { onConflict: 'id' });
-    if (error) errors.credit_ledger = error.message;
-    else syncedCounts.credit_ledger = ledgerRecords.length;
+
+    if (ledgerRecords.length > 0) {
+      const { error } = await supabase.from('credit_ledger').upsert(ledgerRecords, { onConflict: 'id' });
+      if (error) errors.credit_ledger = error.message;
+      else syncedCounts.credit_ledger = ledgerRecords.length;
+    } else {
+      syncedCounts.credit_ledger = 0;
+    }
   } catch (e: any) {
     errors.credit_ledger = e.message;
   }
@@ -852,17 +936,22 @@ export async function pushAllDataToSupabase(payload: {
       token_hash: k.tokenHash,
       raw_key_once: k.rawKeyOnce,
       scopes: k.scopes || [],
-      rate_limit_rpm: k.rateLimitRpm || 300,
-      current_minute_usage: k.currentMinuteUsage || 0,
+      rate_limit_rpm: Number(k.rateLimitRpm || 300),
+      current_minute_usage: Number(k.currentMinuteUsage || 0),
       status: k.status,
       is_hardened_secret: k.isHardenedSecret ?? true,
       description: k.description,
-      expires_at: k.expiresAt,
-      created_at: k.createdAt
+      expires_at: toIsoOrNull(k.expiresAt),
+      created_at: toIsoOrNull(k.createdAt) || new Date().toISOString()
     }));
-    const { error } = await supabase.from('tenant_api_keys').upsert(keyRecords, { onConflict: 'id' });
-    if (error) errors.tenant_api_keys = error.message;
-    else syncedCounts.tenant_api_keys = keyRecords.length;
+
+    if (keyRecords.length > 0) {
+      const { error } = await supabase.from('tenant_api_keys').upsert(keyRecords, { onConflict: 'id' });
+      if (error) errors.tenant_api_keys = error.message;
+      else syncedCounts.tenant_api_keys = keyRecords.length;
+    } else {
+      syncedCounts.tenant_api_keys = 0;
+    }
   } catch (e: any) {
     errors.tenant_api_keys = e.message;
   }
@@ -880,11 +969,16 @@ export async function pushAllDataToSupabase(payload: {
       action: a.action,
       details: a.details,
       ip_address: a.ipAddress,
-      timestamp: a.timestamp
+      timestamp: toIsoOrNull(a.timestamp) || new Date().toISOString()
     }));
-    const { error } = await supabase.from('audit_logs').upsert(auditRecords, { onConflict: 'id' });
-    if (error) errors.audit_logs = error.message;
-    else syncedCounts.audit_logs = auditRecords.length;
+
+    if (auditRecords.length > 0) {
+      const { error } = await supabase.from('audit_logs').upsert(auditRecords, { onConflict: 'id' });
+      if (error) errors.audit_logs = error.message;
+      else syncedCounts.audit_logs = auditRecords.length;
+    } else {
+      syncedCounts.audit_logs = 0;
+    }
   } catch (e: any) {
     errors.audit_logs = e.message;
   }
@@ -910,7 +1004,7 @@ export async function pushAllDataToSupabase(payload: {
     errors.app_settings = e.message;
   }
 
-  const hasAnySuccess = Object.keys(syncedCounts).length > 0;
+  const hasAnySuccess = Object.keys(syncedCounts).length > 0 && Object.keys(errors).length === 0;
   return {
     success: hasAnySuccess,
     syncedCounts,

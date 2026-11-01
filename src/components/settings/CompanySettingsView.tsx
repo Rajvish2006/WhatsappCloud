@@ -48,6 +48,7 @@ export const CompanySettingsView: React.FC = () => {
   const [eventOptOuts, setEventOptOuts] = useState(true);
   const [isVerifyingWebhook, setIsVerifyingWebhook] = useState(false);
   const [verifyFeedback, setVerifyFeedback] = useState<string | null>(null);
+  const [webhookSecret, setWebhookSecret] = useState(currentCompany.webhookVerifyToken || 'webcraft_verify_token_whatsapp');
 
   // Hardened Tokens State
   const [showMasterSecret, setShowMasterSecret] = useState(false);
@@ -616,8 +617,8 @@ export const CompanySettingsView: React.FC = () => {
                 <div className="flex-1 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs font-mono text-slate-800 flex items-center justify-between">
                   <span>
                     {showMasterSecret 
-                      ? (currentCompany.hardSecretToken || 'wc_sec_live_default_permanent_hardened_token') 
-                      : maskSecret(currentCompany.hardSecretToken || 'wc_sec_live_default_permanent_hardened_token', 8)
+                      ? ((currentCompany as any).hardSecretToken || currentCompany.webhookVerifyToken || 'wc_sec_live_default_permanent_hardened_token') 
+                      : maskSecret((currentCompany as any).hardSecretToken || currentCompany.webhookVerifyToken || 'wc_sec_live_default_permanent_hardened_token', 8)
                     }
                   </span>
                   <button
@@ -631,7 +632,7 @@ export const CompanySettingsView: React.FC = () => {
                 </div>
                 <button
                   type="button"
-                  onClick={() => handleCopyText(currentCompany.hardSecretToken || '', 'masterToken')}
+                  onClick={() => handleCopyText((currentCompany as any).hardSecretToken || currentCompany.webhookVerifyToken || '', 'masterToken')}
                   className="p-2 border border-slate-200 rounded-lg text-slate-600 hover:text-blue-600 hover:bg-blue-50 transition cursor-pointer"
                   title="Copy Master Token"
                 >
